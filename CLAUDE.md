@@ -32,6 +32,10 @@ Claude 在开始任何开发任务（撰写代码、文档、配置等）之前�
 	7.	项目协作日志模板
 📄 claude_memory/specs/worklog_template.md
 完成每一个任务后，必须在 claude_workspace/ 下生成日志文档并归档。
+	8.	前端/后端提示词文档（按任务类型读取）
+📄 frontend_claude_memory/prompts/xxx_prompt.md
+📄 backend_claude_memory/prompts/xxx_prompt.md
+根据任务归属（前端 / 后端）读取提示词要求，避免偏差。
 
 ⸻
 
@@ -64,6 +68,7 @@ Claude 应在每一次 Debug 前主动查看上一个调试日志，并明确记
 	•	是否通过测试
 	•	是否影响其他模块
 	•	后续建议
+	•	任务结果总结（必须详细说明任务是否完整完成，是否存在潜在风险）
 
 ⸻
 
@@ -75,11 +80,20 @@ Claude 所有操作遵循以下目录结构：
 ├── claude_workspace/        # 所有Claude任务输出区（日志、临时代码等）
 │   └── 20250926_fix_bug.md
 │
-├── claude_memory/           # Claude长期参考文档区
+├── claude_memory/           # Claude长期参考文档区（后端通用）
 │   ├── specs/               # 所有规范性文件（命名、目录、调试规则等）
 │   ├── protocols/           # 外部协议 / 通信协议等文档
 │   └── references/          # 项目愿景、蓝图、品牌资料等
-
+│
+├── frontend_claude_memory/  # 前端 Claude 提示词专属目录  # 所有前端 Claude 任务提示词文档
+│                
+│
+├── backend_claude_memory/   # 后端 Claude 提示词专属目录
+│   └── prompts/             # 所有后端 Claude 任务提示词文档
+│
+├── pocketspeak/             # 项目主目录
+│   ├── frontend/            # 前端 Flutter 项目 
+│   └── backend/             # 后端 Python / FastAPI 项目
 
 ⸻
 
@@ -89,6 +103,7 @@ Claude 所有操作遵循以下目录结构：
 	3.	❌ 不得在未查阅 CLAUDE.md 的前提下执行任何任务
 	4.	❌ 不得在 Debug 过程中同时进行多项修改
 	5.	❌ 不得忽略版本号、修改时间等更新痕迹
+	6.	❌ 不得自由发挥，无视提示词进行任意创作
 
 ⸻
 
@@ -96,6 +111,7 @@ Claude 所有操作遵循以下目录结构：
 	1.	🧾 必须在 claude_workspace/ 中生成工作日志
 	2.	🧠 如果是新的功能模块，必须更新目录结构说明文档
 	3.	🆕 如果是重要决策修改，必须提醒用户是否需要同步更新蓝图或PRD
+	4.	🧹 如果编写测试代码，必须在测试后删除临时文件与测试数据
 
 ⸻
 
@@ -108,6 +124,7 @@ Claude 在执行过程中如发现任何歧义、冲突、未知事项，必须�
 📌 最后提示
 
 🤖 Claude 是项目的执行引擎，而非创意源头。Claude 的任务是：准确执行用户的意图，最大程度减少错误、模糊与返工。
+
 
 ⸻
 

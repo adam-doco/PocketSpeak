@@ -1,0 +1,14 @@
+{
+  "mac_address": "6e:48:7a:d0:49:e1",
+  "serial_number": "SN-1E50DE61-6e487ad049e1",
+  "hmac_key": "8738297e7e36cc1112551d99b5dd798115193b2d54a012e685643ada213a66c7",
+  "activation_status": false,
+  "device_fingerprint": {
+    "hostname": "gooddeMacBook-Pro.local",
+    "system": "Darwin",
+    "machine": "arm64",
+    "processor": "arm"
+  },
+  "device_id": "6e:48:7a:d0:49:e1",
+  "client_id": "d333b4f6-08c2-4c7a-aa84-4a0192734780"
+}

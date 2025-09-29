@@ -1,0 +1,3 @@
+[submodule "backend/libs/py_xiaozhi"]
+	path = backend/libs/py_xiaozhi
+	url = https://github.com/huangjunsen0406/py-xiaozhi.git

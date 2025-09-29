@@ -12,13 +12,13 @@
 
 Claude 在开始任何开发任务（撰写代码、文档、配置等）之前，必须遵循以下阅读路径：
 	1.	项目蓝图
-📄 claude_memory/references/project_blueprint.md
+📄 backend_claude_memory/references/project_blueprint.md
 了解 PocketSpeak 项目的总体目标、产品定位与版本规划。
 	2.	开发大纲
-📄 claude_memory/specs/dev_overview.md
+📄 backend_claude_memory/specs/development_roadmap.md
 熟悉开发流程、角色分工、Claude 的职责范围。
 	3.	当前版本的 PRD
-📄 claude_memory/specs/PRD_v1.0.md（如当前开发版本为 v1.0）
+📄 backend_claude_memory/specs/pocketspeak_PRD_V1.0.md（如当前开发版本为 v1.0）
 确认当前任务是否符合 PRD 中功能需求。
 	4.	命名规范文档
 📄 claude_memory/specs/naming_convention.md

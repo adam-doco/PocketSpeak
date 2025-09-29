@@ -14,9 +14,13 @@ class _BindingPageState extends State<BindingPage>
     with TickerProviderStateMixin {
   String? deviceId;
   String? verifyCode;
+  String? challenge;
+  String? websocketUrl;
+  String? accessToken;
   String bindingStatus = 'pending';
   bool isLoading = true;
   String? errorMessage;
+  String statusMessage = '正在初始化...';
   Timer? pollTimer;
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
@@ -47,47 +51,88 @@ class _BindingPageState extends State<BindingPage>
 
   Future<void> _initializeBinding() async {
     try {
+      setState(() {
+        statusMessage = '正在获取设备ID...';
+      });
+
       // 获取设备ID
       final deviceIdResult = await _apiService.getDeviceId();
-      // 获取验证码
-      final verifyCodeResult = await _apiService.getVerifyCode();
 
       setState(() {
         deviceId = deviceIdResult;
-        verifyCode = verifyCodeResult;
-        isLoading = false;
+        statusMessage = '正在启动绑定流程...';
       });
 
-      // 开始轮询绑定状态
-      _startPolling();
+      // 启动设备绑定流程
+      final bindingResult = await _apiService.startDeviceBinding(timeout: 300);
+
+      if (bindingResult['success'] == true) {
+        setState(() {
+          verifyCode = bindingResult['verification_code'];
+          challenge = bindingResult['challenge'];
+          websocketUrl = bindingResult['websocket_url'];
+          accessToken = bindingResult['access_token'];
+          statusMessage = bindingResult['message'] ?? '绑定流程已启动';
+          isLoading = false;
+        });
+
+        // 开始轮询绑定确认
+        _startPolling();
+      } else {
+        throw Exception(bindingResult['message'] ?? '启动绑定流程失败');
+      }
     } catch (e) {
       setState(() {
         errorMessage = '初始化失败: $e';
+        statusMessage = '初始化失败';
         isLoading = false;
       });
     }
   }
 
   void _startPolling() {
+    setState(() {
+      statusMessage = '等待用户在小智AI官网确认绑定...';
+    });
+
     pollTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
       try {
-        final status = await _apiService.checkBindStatus();
+        final confirmResult = await _apiService.waitForBindConfirmation(timeout: 300);
+
         if (mounted) {
           setState(() {
-            bindingStatus = status ? 'success' : 'pending';
+            statusMessage = confirmResult['message'] ?? '等待绑定确认...';
           });
 
-          if (status) {
+          if (confirmResult['success'] == true && confirmResult['is_activated'] == true) {
+            setState(() {
+              bindingStatus = 'success';
+              websocketUrl = confirmResult['websocket_url'];
+              accessToken = confirmResult['access_token'];
+              statusMessage = '绑定成功！';
+            });
+
             timer.cancel();
             _navigateToChat();
+          } else if (confirmResult['success'] == false && confirmResult['error_detail'] != null) {
+            // 如果有具体错误，显示错误状态
+            setState(() {
+              bindingStatus = 'failed';
+              errorMessage = confirmResult['error_detail'];
+              statusMessage = '绑定失败';
+            });
+            timer.cancel();
           }
+          // 如果success为false但没有error_detail，继续轮询
         }
       } catch (e) {
         if (mounted) {
           setState(() {
             bindingStatus = 'failed';
             errorMessage = '检查绑定状态失败: $e';
+            statusMessage = '网络连接失败';
           });
+          timer.cancel();
         }
       }
     });
@@ -176,22 +221,34 @@ class _BindingPageState extends State<BindingPage>
     setState(() {
       isLoading = true;
       errorMessage = null;
+      statusMessage = '正在重新获取验证码...';
     });
 
     try {
-      final newVerifyCode = await _apiService.getVerifyCode();
-      setState(() {
-        verifyCode = newVerifyCode;
-        bindingStatus = 'pending';
-        isLoading = false;
-      });
+      // 重新启动设备绑定流程
+      final bindingResult = await _apiService.startDeviceBinding(timeout: 300);
 
-      // 重新开始轮询
-      pollTimer?.cancel();
-      _startPolling();
+      if (bindingResult['success'] == true) {
+        setState(() {
+          verifyCode = bindingResult['verification_code'];
+          challenge = bindingResult['challenge'];
+          websocketUrl = bindingResult['websocket_url'];
+          accessToken = bindingResult['access_token'];
+          bindingStatus = 'pending';
+          statusMessage = bindingResult['message'] ?? '新的绑定流程已启动';
+          isLoading = false;
+        });
+
+        // 重新开始轮询
+        pollTimer?.cancel();
+        _startPolling();
+      } else {
+        throw Exception(bindingResult['message'] ?? '重新启动绑定流程失败');
+      }
     } catch (e) {
       setState(() {
         errorMessage = '刷新验证码失败: $e';
+        statusMessage = '刷新失败';
         isLoading = false;
       });
     }
@@ -339,7 +396,7 @@ class _BindingPageState extends State<BindingPage>
               ),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: const Center(
+            child: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -348,7 +405,7 @@ class _BindingPageState extends State<BindingPage>
                   ),
                   SizedBox(height: 16),
                   Text(
-                    '正在初始化...',
+                    statusMessage,
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 16,
@@ -544,9 +601,11 @@ class _BindingPageState extends State<BindingPage>
             ],
           ),
           const SizedBox(height: 12),
-          const Text(
-            '请在小智 AI 官网输入上方验证码完成设备绑定',
-            style: TextStyle(
+          Text(
+            bindingStatus == 'pending'
+                ? '请在小智 AI 官网输入上方验证码完成设备绑定\n\n当前状态：$statusMessage'
+                : '请在小智 AI 官网输入上方验证码完成设备绑定',
+            style: const TextStyle(
               fontSize: 14,
               color: Color(0xFF636E72),
               height: 1.5,

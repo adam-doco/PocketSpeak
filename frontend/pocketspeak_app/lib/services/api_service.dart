@@ -174,7 +174,7 @@ class ApiService {
   Future<Map<String, dynamic>> markDeviceActivated() async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/api/device/mark-activated'),
+        Uri.parse('$baseUrl/api/device/mark-activated-v2'),
         headers: {'Content-Type': 'application/json'},
       );
 
@@ -248,6 +248,217 @@ class ApiService {
       }
     } catch (e) {
       throw Exception('网络错误: $e');
+    }
+  }
+
+  // ============== WebSocket连接管理接口 ==============
+
+  /// 启动WebSocket连接
+  Future<Map<String, dynamic>> startWebSocketConnection() async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/ws/start'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'message': data['message'] ?? '',
+          'data': data['data'] ?? {},
+        };
+      } else {
+        final errorData = json.decode(response.body);
+        return {
+          'success': false,
+          'message': errorData['detail']?['message'] ?? '启动WebSocket连接失败',
+          'data': errorData['detail']?['data'] ?? {},
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'WebSocket连接启动失败: $e',
+        'data': {},
+      };
+    }
+  }
+
+  /// 停止WebSocket连接
+  Future<Map<String, dynamic>> stopWebSocketConnection() async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/ws/stop'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'message': data['message'] ?? '',
+          'data': data['data'] ?? {},
+        };
+      } else {
+        final errorData = json.decode(response.body);
+        return {
+          'success': false,
+          'message': errorData['detail']?['message'] ?? '停止WebSocket连接失败',
+          'data': errorData['detail']?['data'] ?? {},
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'WebSocket连接停止失败: $e',
+        'data': {},
+      };
+    }
+  }
+
+  /// 获取WebSocket连接状态
+  Future<Map<String, dynamic>> getWebSocketStatus() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/ws/status'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'data': data['data'] ?? {},
+        };
+      } else {
+        throw Exception('获取WebSocket状态失败: ${response.statusCode}');
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'data': {
+          'state': 'error',
+          'connected': false,
+          'authenticated': false,
+          'error': 'WebSocket状态查询失败: $e',
+        },
+      };
+    }
+  }
+
+  /// 重新连接WebSocket
+  Future<Map<String, dynamic>> reconnectWebSocket() async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/ws/reconnect'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'message': data['message'] ?? '',
+          'data': data['data'] ?? {},
+        };
+      } else {
+        final errorData = json.decode(response.body);
+        return {
+          'success': false,
+          'message': errorData['detail']?['message'] ?? 'WebSocket重连失败',
+          'data': errorData['detail']?['data'] ?? {},
+        };
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'WebSocket重连失败: $e',
+        'data': {},
+      };
+    }
+  }
+
+  /// 获取WebSocket健康状态
+  Future<Map<String, dynamic>> getWebSocketHealth() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/ws/health'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else {
+        throw Exception('获取WebSocket健康状态失败: ${response.statusCode}');
+      }
+    } catch (e) {
+      return {
+        'healthy': false,
+        'connection_state': 'error',
+        'connected': false,
+        'authenticated': false,
+        'message': 'WebSocket健康检查失败: $e',
+      };
+    }
+  }
+
+  /// 获取WebSocket统计信息
+  Future<Map<String, dynamic>> getWebSocketStats() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/ws/stats'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'data': data['data'] ?? {},
+        };
+      } else {
+        throw Exception('获取WebSocket统计信息失败: ${response.statusCode}');
+      }
+    } catch (e) {
+      return {
+        'success': false,
+        'data': {},
+        'error': 'WebSocket统计信息获取失败: $e',
+      };
+    }
+  }
+
+  /// 检查设备是否可以建立WebSocket连接（综合检查）
+  Future<Map<String, dynamic>> checkWebSocketReadiness() async {
+    try {
+      // 1. 检查设备激活状态
+      final activationStatus = await waitForBindConfirmation();
+      if (!activationStatus['is_activated']) {
+        return {
+          'ready': false,
+          'reason': 'device_not_activated',
+          'message': '设备未激活，请先完成设备激活流程',
+          'activation_status': activationStatus,
+        };
+      }
+
+      // 2. 检查WebSocket健康状态
+      final healthStatus = await getWebSocketHealth();
+
+      return {
+        'ready': activationStatus['is_activated'] && healthStatus['healthy'],
+        'reason': activationStatus['is_activated'] ? 'ready' : 'device_not_activated',
+        'message': activationStatus['is_activated'] ? 'WebSocket连接就绪' : '设备未激活',
+        'activation_status': activationStatus,
+        'websocket_health': healthStatus,
+      };
+    } catch (e) {
+      return {
+        'ready': false,
+        'reason': 'check_failed',
+        'message': 'WebSocket就绪状态检查失败: $e',
+      };
     }
   }
 }

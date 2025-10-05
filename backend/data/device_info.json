@@ -1,0 +1,38 @@
+{
+  "mac_address": "02:00:00:f2:f7:92",
+  "serial_number": "SN-D7ACBBF1-020000F2F792",
+  "hmac_key": "d25ec203242105adba6e8a550b1d89913a4a75640034e578be1ccae7b9093d9d",
+  "device_id": "02:00:00:f2:f7:92",
+  "client_id": "83178f9e-28af-40f5-b952-f1acf71e16a7",
+  "activated": true,
+  "device_fingerprint": {
+    "hostname": "gooddeMacBook-Pro.local",
+    "system": "Darwin",
+    "machine": "arm64",
+    "processor": "arm"
+  },
+  "activation_method": "zoe",
+  "activated_at": "gooddeMacBook-Pro.local",
+  "connection_params": {
+    "mqtt": {
+      "endpoint": "mqtt.xiaozhi.me",
+      "client_id": "GID_test@@@02_00_00_f2_f7_92@@@83178f9e-28af-40f5-b952-f1acf71e16a7",
+      "username": "eyJpcCI6IjEwMS41My4zNC42In0=",
+      "password": "GaFvMTdZ88RlOai93pBDr8GbeVipW5Yf6ml2IOeWoYU=",
+      "publish_topic": "device-server",
+      "subscribe_topic": "null"
+    },
+    "websocket": {
+      "url": "wss://api.tenclass.net/xiaozhi/v1/",
+      "token": "test-token"
+    },
+    "server_time": {
+      "timestamp": 1759254983114,
+      "timezone_offset": 420
+    },
+    "firmware": {
+      "version": "1.0",
+      "url": ""
+    }
+  }
+}

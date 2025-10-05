@@ -21,13 +21,13 @@ Claude 在开始任何开发任务（撰写代码、文档、配置等）之前�
 📄 backend_claude_memory/specs/pocketspeak_PRD_V1.0.md（如当前开发版本为 v1.0）
 确认当前任务是否符合 PRD 中功能需求。
 	4.	命名规范文档
-📄 claude_memory/specs/naming_convention.md
+📄 backend_claude_memory/specs/naming_convention.md
 所有新建变量、模块、函数、文档、目录都必须遵守命名规范。
 	5.	目录结构说明文档
 📄 claude_memory/specs/folder_structure.md
 所有新建或修改的文件必须存放在正确目录。
 	6.	版本控制规则文档
-📄 claude_memory/specs/version_control.md
+📄 beckend_claude_memory/specs/file_versioning_rules.md
 所有重要变更必须记录版本更新，并写入项目协作日志。
 	7.	项目协作日志模板
 📄 claude_memory/specs/worklog_template.md
@@ -50,7 +50,7 @@ Claude 在调试（debug）代码时，必须遵守以下规则：
 Claude 应在每一次 Debug 前主动查看上一个调试日志，并明确记录调试目标、复现方式、尝试过的修复策略。
 
 🔗 详细规则见：
-📄 claude_memory/specs/debug_rules.md
+📄 beckend_claude_memory/specs/claude_debug_rules.md
 
 ⸻
 

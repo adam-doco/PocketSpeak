@@ -12,9 +12,14 @@ from services.bind_verification import start_device_binding, BindingResult
 from services.bind_status_listener import wait_for_device_binding, BindStatusResult
 from services.zoe_ota_client import zoe_ota_client
 from services.zoe_device_manager import zoe_device_manager
-# 新的PocketSpeak激活逻辑
-from services.device_lifecycle import pocketspeak_device_manager
-from services.pocketspeak_activator import pocketspeak_activator
+# 重构的设备生命周期管理器 - 替代旧的PocketSpeak激活逻辑
+from services.device_lifecycle import device_lifecycle_manager
+
+# 保留旧的激活逻辑供兼容性使用
+try:
+    from services.pocketspeak_activator import pocketspeak_activator
+except ImportError:
+    pocketspeak_activator = None
 
 
 # 创建路由器
@@ -248,28 +253,54 @@ class DeviceCodeResponse(BaseModel):
 @router.get("/device/code", response_model=DeviceCodeResponse)
 async def get_device_code():
     """
-    获取设备绑定验证码 - 使用PocketSpeak真实激活流程（复刻py-xiaozhi）
+    获取设备绑定验证码 - 使用重构的设备生命周期管理器
+    ✅ 如果设备已激活：返回提示"已激活"，不再请求验证码
+    ✅ 如果设备未激活：生成新设备 → 请求验证码 → 返回验证码和设备信息
 
     Returns:
         DeviceCodeResponse: 包含验证码的响应
     """
     try:
-        # 打印设备信息
-        pocketspeak_device_manager.print_device_info()
+        print("\n" + "🔄 开始获取设备激活码...")
 
-        # 使用PocketSpeak激活器获取验证码
-        result = await pocketspeak_activator.request_activation_code()
+        # 使用设备生命周期管理器的核心入口方法
+        result = await device_lifecycle_manager.get_or_create_device_activation()
 
-        return DeviceCodeResponse(
-            success=result["success"],
-            verification_code=result.get("verification_code"),
-            device_id=result.get("device_id", ""),
-            message=result.get("message", ""),
-            error_detail=result.get("error_detail"),
-            server_response=result.get("server_response")
-        )
+        # 如果设备已激活，返回已激活状态
+        if result.get("activated", False):
+            return DeviceCodeResponse(
+                success=True,
+                verification_code=None,  # 已激活设备不需要验证码
+                device_id=result.get("device_id", ""),
+                message="设备已激活，无需重复激活",
+                error_detail=None,
+                server_response={"status": "already_activated"}
+            )
+
+        # 如果设备未激活，返回新获取的验证码
+        if result.get("success", False) and result.get("verification_code"):
+            return DeviceCodeResponse(
+                success=True,
+                verification_code=result["verification_code"],
+                device_id=result.get("device_id", ""),
+                message=result.get("message", "验证码获取成功"),
+                error_detail=None,
+                server_response=result.get("server_response")
+            )
+
+        # 如果激活流程失败
+        else:
+            return DeviceCodeResponse(
+                success=False,
+                verification_code=None,
+                device_id=result.get("device_id", ""),
+                message=result.get("message", "激活流程失败"),
+                error_detail={"error": result.get("error", "未知错误")},
+                server_response=None
+            )
 
     except Exception as e:
+        print(f"❌ API接口异常: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取设备验证码失败: {str(e)}")
 
 
@@ -329,7 +360,7 @@ async def get_activation_status():
         ActivationStatusResponse: 激活状态信息
     """
     try:
-        status_info = await pocketspeak_activator.get_activation_status()
+        status_info = await device_lifecycle_manager.poll_activation_status()
 
         return ActivationStatusResponse(
             is_activated=status_info["is_activated"],
@@ -432,7 +463,7 @@ async def reset_activation_status():
         Dict: 重置结果
     """
     try:
-        success = pocketspeak_device_manager.reset_activation_status()
+        success = device_lifecycle_manager.reset_activation_status()
 
         if success:
             return {
@@ -448,3 +479,91 @@ async def reset_activation_status():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"重置激活状态失败: {str(e)}")
+
+
+# 新增API端点 - 使用设备生命周期管理器
+
+
+@router.post("/device/mark-activated-v2")
+async def mark_device_activated_v2():
+    """
+    手动标记设备为已激活 - 使用新的设备生命周期管理器
+    用户在xiaozhi.me完成绑定后调用此接口
+
+    Returns:
+        Dict: 标记结果
+    """
+    try:
+        success = device_lifecycle_manager.mark_device_activated()
+
+        if success:
+            return {
+                "success": True,
+                "message": "设备已标记为激活状态",
+                "is_activated": True
+            }
+        else:
+            return {
+                "success": False,
+                "message": "标记激活状态失败",
+                "is_activated": False
+            }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"标记激活状态失败: {str(e)}")
+
+
+@router.get("/device/status-v2")
+async def get_device_status_v2():
+    """
+    获取设备状态信息 - 使用新的设备生命周期管理器
+    用于调试和状态查询
+
+    Returns:
+        Dict: 设备状态信息
+    """
+    try:
+        status_info = device_lifecycle_manager.get_device_status_info()
+
+        return {
+            "success": True,
+            "device_status": status_info,
+            "message": "设备状态查询成功"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询设备状态失败: {str(e)}")
+
+
+@router.get("/device/lifecycle-info")
+async def get_device_lifecycle_info():
+    """
+    获取设备生命周期完整信息 - 包括设备信息、激活状态、存储路径等
+
+    Returns:
+        Dict: 完整的设备生命周期信息
+    """
+    try:
+        # 获取设备状态信息
+        status_info = device_lifecycle_manager.get_device_status_info()
+
+        # 检查是否激活
+        is_activated = device_lifecycle_manager.is_device_activated()
+
+        # 获取存储文件路径
+        device_file_path = str(device_lifecycle_manager.device_info_file)
+
+        return {
+            "success": True,
+            "device_lifecycle_info": {
+                "device_info": status_info,
+                "is_activated": is_activated,
+                "device_file_path": device_file_path,
+                "lifecycle_manager": "PocketSpeakDeviceLifecycle",
+                "supports_activation_methods": ["zoe", "pocketspeak"]
+            },
+            "message": "设备生命周期信息获取成功"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取设备生命周期信息失败: {str(e)}")

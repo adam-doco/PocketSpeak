@@ -1,0 +1,76 @@
+{
+  "SYSTEM_OPTIONS": {
+    "CLIENT_ID": null,
+    "DEVICE_ID": null,
+    "NETWORK": {
+      "OTA_VERSION_URL": "https://api.tenclass.net/xiaozhi/ota/",
+      "WEBSOCKET_URL": null,
+      "WEBSOCKET_ACCESS_TOKEN": null,
+      "MQTT_INFO": null,
+      "ACTIVATION_VERSION": "v2",
+      "AUTHORIZATION_URL": "https://xiaozhi.me/"
+    }
+  },
+  "WAKE_WORD_OPTIONS": {
+    "USE_WAKE_WORD": true,
+    "MODEL_PATH": "models",
+    "NUM_THREADS": 4,
+    "PROVIDER": "cpu",
+    "MAX_ACTIVE_PATHS": 2,
+    "KEYWORDS_SCORE": 1.8,
+    "KEYWORDS_THRESHOLD": 0.2,
+    "NUM_TRAILING_BLANKS": 1
+  },
+  "CAMERA": {
+    "camera_index": 0,
+    "frame_width": 640,
+    "frame_height": 480,
+    "fps": 30,
+    "Local_VL_url": "https://open.bigmodel.cn/api/paas/v4/",
+    "VLapi_key": "",
+    "models": "glm-4v-plus"
+  },
+  "SHORTCUTS": {
+    "ENABLED": true,
+    "MANUAL_PRESS": {
+      "modifier": "ctrl",
+      "key": "j",
+      "description": "按住说话"
+    },
+    "AUTO_TOGGLE": {
+      "modifier": "ctrl",
+      "key": "k",
+      "description": "自动对话"
+    },
+    "ABORT": {
+      "modifier": "ctrl",
+      "key": "q",
+      "description": "中断对话"
+    },
+    "MODE_TOGGLE": {
+      "modifier": "ctrl",
+      "key": "m",
+      "description": "切换模式"
+    },
+    "WINDOW_TOGGLE": {
+      "modifier": "ctrl",
+      "key": "w",
+      "description": "显示/隐藏窗口"
+    }
+  },
+  "AEC_OPTIONS": {
+    "ENABLED": false,
+    "BUFFER_MAX_LENGTH": 200,
+    "FRAME_DELAY": 3,
+    "FILTER_LENGTH_RATIO": 0.4,
+    "ENABLE_PREPROCESS": true
+  },
+  "AUDIO_DEVICES": {
+    "input_device_id": null,
+    "input_device_name": null,
+    "output_device_id": null,
+    "output_device_name": null,
+    "input_sample_rate": null,
+    "output_sample_rate": null
+  }
+}

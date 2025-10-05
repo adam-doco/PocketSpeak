@@ -233,16 +233,139 @@ class PocketSpeakActivator:
             }
 
     async def get_activation_status(self) -> Dict[str, Any]:
-        """获取激活状态"""
-        is_activated = pocketspeak_device_manager.check_activation_status()
-        device_info = pocketspeak_device_manager.get_device_info()
+        """
+        获取激活状态 - 真正轮询小智AI服务器
+        这个方法会向小智AI服务器查询设备是否已被用户激活
+        """
+        try:
+            # 1. 首先检查本地激活状态
+            local_is_activated = pocketspeak_device_manager.check_activation_status()
+            device_info = pocketspeak_device_manager.get_device_info()
 
-        return {
-            "is_activated": is_activated,
-            "device_id": device_info.get("device_id"),
-            "serial_number": device_info.get("serial_number"),
-            "activation_status": "已激活" if is_activated else "未激活"
-        }
+            if local_is_activated:
+                return {
+                    "is_activated": True,
+                    "device_id": device_info.get("device_id"),
+                    "serial_number": device_info.get("serial_number"),
+                    "activation_status": "已激活",
+                    "websocket_url": "wss://api.xiaozhi.com/v1/ws",
+                    "access_token": "pocketspeak_activated"
+                }
+
+            # 2. 如果本地未激活，向小智AI服务器查询激活状态
+            serial_number = device_info.get("serial_number")
+            device_id = device_info.get("device_id")
+            client_id = device_info.get("client_id")
+
+            if not serial_number or not device_id:
+                return {
+                    "is_activated": False,
+                    "device_id": device_id,
+                    "serial_number": serial_number,
+                    "activation_status": "设备信息不完整",
+                    "error": "缺少设备序列号或ID"
+                }
+
+            # 3. 构造轮询请求 - 查询设备激活状态
+            headers = {
+                "DeviceId": device_id,
+                "ClientId": client_id,
+                "Activation-Version": "2",
+                "Content-Type": "application/json",
+                "User-Agent": "PocketSpeak/1.0"
+            }
+
+            # 构造状态查询请求体
+            request_body = {
+                "Payload": {
+                    "action": "check_activation",
+                    "serial_number": serial_number,
+                    "device_id": device_id
+                }
+            }
+
+            print(f"🔍 轮询小智AI服务器激活状态...")
+            print(f"📱 设备ID: {device_id}")
+            print(f"🏷️ 序列号: {serial_number}")
+
+            # 4. 发送状态查询请求
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    self.activate_url,  # 使用相同的激活URL进行状态查询
+                    headers=headers,
+                    json=request_body
+                ) as response:
+                    response_text = await response.text()
+                    status_code = response.status
+
+                    print(f"📡 轮询响应状态: HTTP {status_code}")
+                    print(f"📄 轮询响应内容: {response_text}")
+
+                    if status_code == 200:
+                        try:
+                            response_data = await response.json()
+
+                            # 检查服务器返回的激活状态
+                            server_activated = response_data.get("activated", False)
+                            activation_info = response_data.get("activation_info", {})
+
+                            if server_activated:
+                                # 服务器确认设备已激活，同步到本地
+                                print("✅ 服务器确认设备已激活，更新本地状态...")
+                                pocketspeak_device_manager.mark_device_as_activated()
+
+                                return {
+                                    "is_activated": True,
+                                    "device_id": device_id,
+                                    "serial_number": serial_number,
+                                    "activation_status": "服务器确认已激活",
+                                    "websocket_url": activation_info.get("websocket_url", "wss://api.xiaozhi.com/v1/ws"),
+                                    "access_token": activation_info.get("access_token", "pocketspeak_activated"),
+                                    "server_response": response_data
+                                }
+                            else:
+                                # 服务器确认设备未激活
+                                return {
+                                    "is_activated": False,
+                                    "device_id": device_id,
+                                    "serial_number": serial_number,
+                                    "activation_status": "等待用户在xiaozhi.me完成激活",
+                                    "message": "请在xiaozhi.me输入验证码完成设备激活"
+                                }
+
+                        except Exception as e:
+                            print(f"❌ 解析服务器响应失败: {e}")
+                            # JSON解析失败，返回本地状态
+                            return {
+                                "is_activated": False,
+                                "device_id": device_id,
+                                "serial_number": serial_number,
+                                "activation_status": "服务器响应解析失败",
+                                "error": str(e)
+                            }
+                    else:
+                        print(f"⚠️ 服务器轮询失败: HTTP {status_code}")
+                        # 服务器请求失败，返回本地状态
+                        return {
+                            "is_activated": False,
+                            "device_id": device_id,
+                            "serial_number": serial_number,
+                            "activation_status": f"服务器轮询失败 (HTTP {status_code})",
+                            "error": f"HTTP {status_code}: {response_text}"
+                        }
+
+        except Exception as e:
+            print(f"❌ 轮询激活状态发生错误: {e}")
+            # 网络错误等，返回本地状态
+            device_info = pocketspeak_device_manager.get_device_info()
+            return {
+                "is_activated": False,
+                "device_id": device_info.get("device_id"),
+                "serial_number": device_info.get("serial_number"),
+                "activation_status": "轮询网络错误",
+                "error": str(e)
+            }
 
     def manual_mark_activated(self) -> bool:
         """手动标记设备为已激活（用于用户在官网完成绑定后）"""

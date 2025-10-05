@@ -3,13 +3,16 @@ PocketSpeak Backend 主程序入口
 FastAPI 应用程序启动和配置
 """
 
+# 必须在导入其他模块之前初始化路径
+import setup_paths  # noqa: F401
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from config.settings import settings
-from routers import device
+from routers import device, ws_lifecycle, voice_chat
 from core.device_manager import print_device_debug_info
 
 
@@ -51,6 +54,8 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(device.router)
+app.include_router(ws_lifecycle.router)
+app.include_router(voice_chat.router)
 
 
 # 根路径

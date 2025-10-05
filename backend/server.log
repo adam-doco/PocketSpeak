@@ -1,0 +1,14 @@
+🚀 启动 PocketSpeak Backend...
+📁 PYTHONPATH: :/Users/good/Desktop/PocketSpeak/backend/libs/py_xiaozhi
+
+INFO:     Will watch for changes in these directories: ['/Users/good/Desktop/PocketSpeak/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [75581] using WatchFiles
+INFO:     Started server process [75612]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [75612]
+INFO:     Stopping reloader process [75581]

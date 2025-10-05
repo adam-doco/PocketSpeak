@@ -2,21 +2,38 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/voice_service.dart';
+import '../services/audio_player_service.dart';
 
 class ChatMessage {
+  final String messageId;
   final String text;
   final bool isUser;
   final DateTime timestamp;
   final bool hasAudio;
   final String? audioUrl;
+  final String? audioData;  // Base64编码的音频数据
 
   ChatMessage({
+    required this.messageId,
     required this.text,
     required this.isUser,
     required this.timestamp,
     this.hasAudio = false,
     this.audioUrl,
+    this.audioData,
   });
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    return ChatMessage(
+      messageId: json['message_id'] ?? '',
+      text: json['user_text'] ?? json['ai_text'] ?? '',
+      isUser: json['user_text'] != null,
+      timestamp: DateTime.parse(json['timestamp']),
+      hasAudio: json['has_audio'] ?? false,
+      audioData: json['audio_data'],  // 获取Base64音频数据
+    );
+  }
 }
 
 class ChatPage extends StatefulWidget {
@@ -32,22 +49,32 @@ class _ChatPageState extends State<ChatPage>
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
+  // 服务实例
+  final VoiceService _voiceService = VoiceService();
+  final ApiService _apiService = ApiService();
+  final AudioPlayerService _audioPlayerService = AudioPlayerService();
+
+  // 状态管理
+  bool _isSessionInitialized = false;
   bool _isRecording = false;
   bool _isProcessing = false;
   String _listeningText = "";
+  String _sessionState = "idle";
 
+  // 动画控制器
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
   late AnimationController _typingController;
   late Animation<double> _typingAnimation;
 
-  final ApiService _apiService = ApiService(); // TODO: 将在后续集成真实API时使用
+  // 轮询定时器
+  Timer? _statusPollingTimer;
 
   @override
   void initState() {
     super.initState();
     _setupAnimations();
-    _addWelcomeMessage();
+    _initializeVoiceSession();
   }
 
   void _setupAnimations() {
@@ -76,9 +103,125 @@ class _ChatPageState extends State<ChatPage>
     ));
   }
 
+  /// 初始化语音会话
+  Future<void> _initializeVoiceSession() async {
+    try {
+      print('🚀 开始初始化语音会话...');
+
+      // 显示加载提示
+      setState(() {
+        _isProcessing = true;
+        _listeningText = "正在初始化语音会话...";
+      });
+
+      // 初始化语音会话
+      final result = await _voiceService.initSession(
+        autoPlayTts: false,  // 前端播放音频,后端不播放
+        saveConversation: true,
+        enableEchoCancellation: true,
+      );
+
+      if (result['success'] == true) {
+        setState(() {
+          _isSessionInitialized = true;
+          _sessionState = result['state'] ?? 'ready';
+          _isProcessing = false;
+          _listeningText = "";
+        });
+
+        print('✅ 语音会话初始化成功: ${result['session_id']}');
+
+        // 加载欢迎消息
+        _addWelcomeMessage();
+
+        // 启动状态轮询
+        _startStatusPolling();
+      } else {
+        setState(() {
+          _isProcessing = false;
+          _listeningText = "";
+        });
+
+        // 显示错误提示
+        _showErrorDialog('初始化失败', result['message'] ?? '无法初始化语音会话');
+      }
+    } catch (e) {
+      print('❌ 初始化语音会话异常: $e');
+      setState(() {
+        _isProcessing = false;
+        _listeningText = "";
+      });
+
+      _showErrorDialog('初始化异常', '初始化语音会话时发生错误: $e');
+    }
+  }
+
+  /// 启动状态轮询（监听AI响应）
+  void _startStatusPolling() {
+    // 每2秒查询一次会话状态
+    _statusPollingTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+      if (!_isSessionInitialized) {
+        timer.cancel();
+        return;
+      }
+
+      // 查询对话历史，获取新消息
+      final historyResult = await _voiceService.getConversationHistory(limit: 1);
+
+      if (historyResult['success'] == true) {
+        final messages = historyResult['messages'] as List;
+
+        // 如果有新消息且是AI回复，添加到消息列表
+        if (messages.isNotEmpty) {
+          final latestMessage = messages.first;
+          final messageId = latestMessage['message_id'];
+
+          // 检查是否已存在
+          final exists = _messages.any((msg) => msg.messageId == messageId);
+
+          if (!exists && latestMessage['ai_text'] != null) {
+            final aiMessage = ChatMessage.fromJson(latestMessage);
+
+            setState(() {
+              _messages.add(aiMessage);
+              _isProcessing = false;
+            });
+
+            _typingController.stop();
+            _scrollToBottom();
+
+            // 如果有音频数据，自动播放
+            if (aiMessage.hasAudio && aiMessage.audioData != null) {
+              print('🔊 检测到AI音频回复，准备播放...');
+              _audioPlayerService.playBase64Audio(
+                aiMessage.audioData!,
+                audioId: aiMessage.messageId,
+              ).then((success) {
+                if (success) {
+                  print('✅ AI音频播放成功');
+                } else {
+                  print('❌ AI音频播放失败');
+                }
+              });
+            }
+          }
+        }
+      }
+
+      // 更新会话状态
+      final statusResult = await _voiceService.getSessionStatus();
+      if (statusResult['success'] == true) {
+        setState(() {
+          _sessionState = statusResult['data']?['state'] ?? _sessionState;
+        });
+      }
+    });
+  }
+
   void _addWelcomeMessage() {
     setState(() {
       _messages.add(ChatMessage(
+        messageId: 'welcome_${DateTime.now().millisecondsSinceEpoch}',
         text: "你好！我是小智AI，你的英语学习伙伴。让我们开始一段有趣的英语对话吧！🎯",
         isUser: false,
         timestamp: DateTime.now(),
@@ -88,90 +231,127 @@ class _ChatPageState extends State<ChatPage>
     _scrollToBottom();
   }
 
+  /// 开始语音录音
   Future<void> _startVoiceRecording() async {
-    if (_isRecording || _isProcessing) return;
+    if (_isRecording || _isProcessing || !_isSessionInitialized) {
+      print('⚠️ 无法开始录音: isRecording=$_isRecording, isProcessing=$_isProcessing, isInitialized=$_isSessionInitialized');
+      return;
+    }
 
-    setState(() {
-      _isRecording = true;
-      _listeningText = "正在听您说话...";
-    });
+    try {
+      setState(() {
+        _listeningText = "正在连接...";
+      });
 
-    _pulseController.repeat(reverse: true);
+      // 调用后端开始录音API
+      final result = await _voiceService.startRecording();
 
-    // 模拟语音识别过程
-    await Future.delayed(const Duration(seconds: 2));
+      if (result['success'] == true) {
+        setState(() {
+          _isRecording = true;
+          _listeningText = "正在听您说话...";
+          _sessionState = result['state'] ?? _sessionState;
+        });
 
-    // 模拟识别结果
-    const recognizedText = "Hello, how are you today?";
-
-    setState(() {
-      _isRecording = false;
-      _listeningText = "";
-    });
-
-    _pulseController.stop();
-
-    _addUserMessage(recognizedText);
-    _processAIResponse(recognizedText);
+        _pulseController.repeat(reverse: true);
+        print('🎤 开始录音');
+      } else {
+        setState(() {
+          _listeningText = "";
+        });
+        _showSnackBar('无法开始录音: ${result['message']}');
+      }
+    } catch (e) {
+      print('❌ 开始录音异常: $e');
+      setState(() {
+        _listeningText = "";
+      });
+      _showSnackBar('开始录音失败: $e');
+    }
   }
 
-  void _stopVoiceRecording() {
+  /// 停止语音录音
+  Future<void> _stopVoiceRecording() async {
     if (!_isRecording) return;
 
-    setState(() {
-      _isRecording = false;
-      _listeningText = "";
-    });
+    try {
+      // 调用后端停止录音API
+      final result = await _voiceService.stopRecording();
 
-    _pulseController.stop();
+      setState(() {
+        _isRecording = false;
+        _listeningText = result['success'] == true ? "正在处理..." : "";
+        _sessionState = result['state'] ?? _sessionState;
+      });
+
+      _pulseController.stop();
+      print('⏹️ 停止录音');
+
+      if (result['success'] == true) {
+        // 开始等待AI响应
+        setState(() {
+          _isProcessing = true;
+        });
+        _typingController.repeat();
+      } else {
+        _showSnackBar('停止录音失败: ${result['message']}');
+      }
+    } catch (e) {
+      print('❌ 停止录音异常: $e');
+      setState(() {
+        _isRecording = false;
+        _listeningText = "";
+      });
+      _pulseController.stop();
+      _showSnackBar('停止录音失败: $e');
+    }
   }
 
-  void _addUserMessage(String text) {
-    setState(() {
-      _messages.add(ChatMessage(
-        text: text,
-        isUser: true,
-        timestamp: DateTime.now(),
-      ));
-    });
-    _scrollToBottom();
-  }
-
-  Future<void> _processAIResponse(String userMessage) async {
-    setState(() {
-      _isProcessing = true;
-    });
-
-    _typingController.repeat();
-
-    // 模拟AI响应延迟
-    await Future.delayed(const Duration(seconds: 3));
-
-    // 模拟AI回复
-    const aiResponse = "I'm doing great, thank you for asking! How about you? What would you like to practice today? 😊";
-
-    setState(() {
-      _isProcessing = false;
-      _messages.add(ChatMessage(
-        text: aiResponse,
-        isUser: false,
-        timestamp: DateTime.now(),
-        hasAudio: true,
-        audioUrl: "mock_audio_url",
-      ));
-    });
-
-    _typingController.stop();
-    _scrollToBottom();
-  }
-
-  void _sendTextMessage() {
+  /// 发送文本消息
+  Future<void> _sendTextMessage() async {
     final text = _textController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || !_isSessionInitialized) return;
 
-    _addUserMessage(text);
-    _textController.clear();
-    _processAIResponse(text);
+    try {
+      // 添加用户消息到UI
+      setState(() {
+        _messages.add(ChatMessage(
+          messageId: 'user_${DateTime.now().millisecondsSinceEpoch}',
+          text: text,
+          isUser: true,
+          timestamp: DateTime.now(),
+        ));
+        _isProcessing = true;
+      });
+
+      _textController.clear();
+      _scrollToBottom();
+      _typingController.repeat();
+
+      // 调用后端发送文本API
+      final result = await _voiceService.sendTextMessage(text);
+
+      if (result['success'] == true) {
+        setState(() {
+          _sessionState = result['state'] ?? _sessionState;
+        });
+        print('💬 文本消息已发送: $text');
+        // AI响应会通过状态轮询自动添加
+      } else {
+        setState(() {
+          _isProcessing = false;
+        });
+        _typingController.stop();
+        _showSnackBar('发送消息失败: ${result['message']}');
+      }
+    } catch (e) {
+      print('❌ 发送文本消息异常: $e');
+      setState(() {
+        _isProcessing = false;
+      });
+      _typingController.stop();
+      _showSnackBar('发送消息失败: $e');
+    }
   }
 
   void _scrollToBottom() {
@@ -186,25 +366,55 @@ class _ChatPageState extends State<ChatPage>
     });
   }
 
+  void _showSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _showErrorDialog(String title, String message) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
+    _statusPollingTimer?.cancel();
     _pulseController.dispose();
     _typingController.dispose();
     _textController.dispose();
     _scrollController.dispose();
+    _audioPlayerService.dispose();
+
+    // 关闭语音会话
+    _voiceService.closeSession();
+
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
-    final screenHeight = screenSize.height;
-
     return Scaffold(
-      backgroundColor: const Color(0xFF1a1a2e), // 深色背景模拟模型展示区
+      backgroundColor: const Color(0xFF1a1a2e),
       body: Stack(
         children: [
-          // 全屏模型展示区域 (目前用渐变背景模拟)
+          // 全屏模型展示区域
           Container(
             width: double.infinity,
             height: double.infinity,
@@ -223,7 +433,7 @@ class _ChatPageState extends State<ChatPage>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // 模拟AI角色展示区域
+                  // AI角色展示区域
                   Container(
                     width: 200,
                     height: 200,
@@ -259,7 +469,9 @@ class _ChatPageState extends State<ChatPage>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '英语学习伙伴',
+                    _isSessionInitialized
+                        ? '英语学习伙伴 • ${_getStateText()}'
+                        : '正在初始化...',
                     style: TextStyle(
                       fontSize: 16,
                       color: Colors.white.withValues(alpha: 0.7),
@@ -292,15 +504,15 @@ class _ChatPageState extends State<ChatPage>
             ),
           ),
 
-          // 聊天消息区域 (扩展到输入区上方)
+          // 聊天消息区域
           Positioned(
-            left: 4, // 减少左边距
-            right: 4, // 减少右边距
-            bottom: 60, // 进一步向下扩展，减少与输入区间距
+            left: 4,
+            right: 4,
+            bottom: 60,
             child: Container(
-              height: 320, // 向上扩展20px，从240改为260
+              height: 320,
               decoration: BoxDecoration(
-                color: Colors.transparent, // 100%透明
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
@@ -314,7 +526,7 @@ class _ChatPageState extends State<ChatPage>
             ),
           ),
 
-          // 输入区域 (完全贴底部，无SafeArea)
+          // 输入区域
           Positioned(
             left: 0,
             right: 0,
@@ -326,9 +538,24 @@ class _ChatPageState extends State<ChatPage>
     );
   }
 
+  String _getStateText() {
+    switch (_sessionState) {
+      case 'listening':
+        return '正在听';
+      case 'processing':
+        return '正在思考';
+      case 'speaking':
+        return '正在说话';
+      case 'ready':
+        return '就绪';
+      default:
+        return '在线';
+    }
+  }
+
   Widget _buildChatList() {
     return Container(
-      padding: const EdgeInsets.only(left: 16, right: 16, top: 6, bottom: 4), // 减少底部内边距
+      padding: const EdgeInsets.only(left: 16, right: 16, top: 6, bottom: 4),
       child: ListView.builder(
         controller: _scrollController,
         itemCount: _messages.length + (_isProcessing ? 1 : 0),
@@ -346,7 +573,7 @@ class _ChatPageState extends State<ChatPage>
 
   Widget _buildMessageBubble(ChatMessage message) {
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4), // 缩小气泡间距
+      margin: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: message.isUser
             ? MainAxisAlignment.end
@@ -361,12 +588,12 @@ class _ChatPageState extends State<ChatPage>
               decoration: BoxDecoration(
                 gradient: message.isUser
                     ? const LinearGradient(
-                        colors: [Color(0xFF00d4aa), Color(0xFF00c4a7)], // Zoe的绿色渐变
+                        colors: [Color(0xFF00d4aa), Color(0xFF00c4a7)],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       )
                     : null,
-                color: message.isUser ? null : Colors.white, // AI消息白色背景
+                color: message.isUser ? null : Colors.white,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(16),
                   topRight: const Radius.circular(16),
@@ -396,50 +623,9 @@ class _ChatPageState extends State<ChatPage>
     );
   }
 
-  Widget _buildAudioPlayer() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8F9FA),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          GestureDetector(
-            onTap: () {
-              // TODO: 实现音频播放
-            },
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: const Color(0xFF667EEA),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Icon(
-                Icons.play_arrow,
-                color: Colors.white,
-                size: 18,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          const Text(
-            '点击播放语音',
-            style: TextStyle(
-              fontSize: 12,
-              color: Color(0xFF636E72),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildTypingIndicator() {
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4), // 缩小气泡间距
+      margin: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
           Container(
@@ -501,12 +687,11 @@ class _ChatPageState extends State<ChatPage>
       padding: EdgeInsets.only(
         left: 16,
         right: 16,
-        top: 4,  // 恢复原来的顶部间距
-        bottom: MediaQuery.of(context).padding.bottom - 8, // 大幅减少底部间距，缩短背景
+        top: 4,
+        bottom: MediaQuery.of(context).padding.bottom - 8,
       ),
       decoration: BoxDecoration(
-        color: Colors.white, // 改为纯白色背景
-        // 完全移除圆角，直接贴底
+        color: Colors.white,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.1),
@@ -521,8 +706,8 @@ class _ChatPageState extends State<ChatPage>
           if (_isRecording || _listeningText.isNotEmpty) ...[
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(8), // 从12改为8
-              margin: const EdgeInsets.only(bottom: 8), // 从12改为8
+              padding: const EdgeInsets.all(8),
+              margin: const EdgeInsets.only(bottom: 8),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
@@ -567,20 +752,27 @@ class _ChatPageState extends State<ChatPage>
             ),
           ],
 
-          // 统一的输入区域背景
+          // 输入区域
           Container(
-            padding: const EdgeInsets.only(left: 4, right: 4, top: 14, bottom: 6), // 再增加6px，从8改为14
+            padding: const EdgeInsets.only(left: 4, right: 4, top: 14, bottom: 6),
             decoration: BoxDecoration(
-              color: Colors.white, // 改为白色背景
+              color: Colors.white,
               borderRadius: BorderRadius.circular(24),
             ),
             child: Row(
               children: [
-                // 语音按钮 - 无独立背景
+                // 语音按钮
                 GestureDetector(
                   onLongPressStart: (_) => _startVoiceRecording(),
                   onLongPressEnd: (_) => _stopVoiceRecording(),
-                  onTap: _startVoiceRecording,
+                  onTap: () {
+                    // 点击切换录音状态：未录音时开始，录音中时停止
+                    if (_isRecording) {
+                      _stopVoiceRecording();
+                    } else {
+                      _startVoiceRecording();
+                    }
+                  },
                   child: AnimatedBuilder(
                     animation: _pulseAnimation,
                     builder: (context, child) {
@@ -592,7 +784,9 @@ class _ChatPageState extends State<ChatPage>
                           decoration: BoxDecoration(
                             color: _isRecording
                                 ? const Color(0xFFE74C3C)
-                                : const Color(0xFF00d4aa), // 纯绿色
+                                : (_isSessionInitialized
+                                    ? const Color(0xFF00d4aa)
+                                    : const Color(0xFFCCCCCC)),
                             borderRadius: BorderRadius.circular(18),
                           ),
                           child: Icon(
@@ -608,17 +802,18 @@ class _ChatPageState extends State<ChatPage>
 
                 const SizedBox(width: 8),
 
-                // 输入框 - 扁平设计
+                // 输入框
                 Expanded(
                   child: Container(
                     height: 36,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF5F5F5), // 改为浅灰色
+                      color: const Color(0xFFF5F5F5),
                       borderRadius: BorderRadius.circular(18),
                     ),
                     child: TextField(
                       controller: _textController,
-                      textAlign: TextAlign.left, // 确保文字左对齐
+                      enabled: _isSessionInitialized,
+                      textAlign: TextAlign.left,
                       decoration: const InputDecoration(
                         hintText: '请输入文本...',
                         hintStyle: TextStyle(
@@ -628,17 +823,17 @@ class _ChatPageState extends State<ChatPage>
                         border: InputBorder.none,
                         contentPadding: EdgeInsets.symmetric(
                           horizontal: 12,
-                          vertical: 10, // 调整垂直居中
+                          vertical: 10,
                         ),
                       ),
                       style: const TextStyle(
                         fontSize: 14,
                         color: Color(0xFF2D3436),
                       ),
-                      textAlignVertical: TextAlignVertical.center, // 垂直居中
+                      textAlignVertical: TextAlignVertical.center,
                       onSubmitted: (_) => _sendTextMessage(),
                       onChanged: (text) {
-                        setState(() {}); // 触发重建以更新发送按钮状态
+                        setState(() {});
                       },
                     ),
                   ),
@@ -646,19 +841,21 @@ class _ChatPageState extends State<ChatPage>
 
                 const SizedBox(width: 8),
 
-                // 发送按钮 - 无独立背景
+                // 发送按钮
                 GestureDetector(
-                  onTap: _textController.text.trim().isNotEmpty ? _sendTextMessage : null,
+                  onTap: _textController.text.trim().isNotEmpty && _isSessionInitialized
+                      ? _sendTextMessage
+                      : null,
                   child: Container(
                     width: 36,
                     height: 36,
                     decoration: BoxDecoration(
-                      color: _textController.text.trim().isNotEmpty
-                          ? const Color(0xFF667EEA) // 纯紫色
-                          : const Color(0xFFCCCCCC), // 禁用状态灰色
+                      color: _textController.text.trim().isNotEmpty && _isSessionInitialized
+                          ? const Color(0xFF667EEA)
+                          : const Color(0xFFCCCCCC),
                       borderRadius: BorderRadius.circular(18),
                     ),
-                    child: Icon(
+                    child: const Icon(
                       Icons.send,
                       color: Colors.white,
                       size: 18,
@@ -668,7 +865,6 @@ class _ChatPageState extends State<ChatPage>
               ],
             ),
           ),
-
         ],
       ),
     );

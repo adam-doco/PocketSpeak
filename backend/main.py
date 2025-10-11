@@ -6,6 +6,7 @@ FastAPI 应用程序启动和配置
 # 必须在导入其他模块之前初始化路径
 import setup_paths  # noqa: F401
 
+import logging
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +15,12 @@ from contextlib import asynccontextmanager
 from config.settings import settings
 from routers import device, ws_lifecycle, voice_chat
 from core.device_manager import print_device_debug_info
+
+# 配置应用日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s:%(name)s:%(message)s'
+)
 
 
 @asynccontextmanager

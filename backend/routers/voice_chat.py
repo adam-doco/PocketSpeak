@@ -549,6 +549,180 @@ async def get_conversation_history(limit: int = 50):
         )
 
 
+@router.get("/conversation/sentences")
+async def get_completed_sentences(last_sentence_index: int = 0):
+    """
+    获取已完成的句子及其音频（用于逐句播放）
+
+    Args:
+        last_sentence_index: 前端已获取到的句子索引
+
+    Returns:
+        已完成的句子列表
+    """
+    try:
+        session = get_voice_session()
+        if not session:
+            return {
+                "success": False,
+                "message": "语音会话未初始化",
+                "data": {
+                    "has_new_sentences": False,
+                    "is_complete": False
+                }
+            }
+
+        current_message = session.current_message
+        if not current_message:
+            return {
+                "success": True,
+                "message": "当前没有进行中的对话",
+                "data": {
+                    "has_new_sentences": False,
+                    "total_sentences": 0,
+                    "is_complete": False
+                }
+            }
+
+        # 获取已完成的句子
+        result = current_message.get_completed_sentences(last_sentence_index)
+
+        if result["has_new_sentences"]:
+            logger.info(f"🎵 返回新完成的句子: {len(result['sentences'])}句, 总计{result['total_sentences']}句, 完成={result['is_complete']}")
+
+        return {
+            "success": True,
+            "message": "获取句子成功",
+            "data": result
+        }
+
+    except Exception as e:
+        logger.error(f"获取句子失败: {e}", exc_info=True)
+        return {
+            "success": False,
+            "message": str(e),
+            "data": {
+                "has_new_sentences": False,
+                "is_complete": False
+            }
+        }
+
+
+@router.get("/conversation/incremental-audio")
+async def get_incremental_audio(last_chunk_index: int = 0):
+    """
+    获取当前对话的增量音频数据（用于流式播放）
+
+    Args:
+        last_chunk_index: 前端已获取到的音频块索引
+
+    Returns:
+        增量音频数据
+    """
+    try:
+        session = get_voice_session()
+        if not session:
+            return {
+                "success": False,
+                "message": "语音会话未初始化",
+                "data": {
+                    "has_new_audio": False,
+                    "is_complete": False
+                }
+            }
+
+        # 获取当前消息
+        current_message = session.current_message
+        if not current_message:
+            return {
+                "success": True,
+                "message": "当前没有进行中的对话",
+                "data": {
+                    "has_new_audio": False,
+                    "is_complete": False
+                }
+            }
+
+        # 获取增量音频
+        audio_info = current_message.get_incremental_audio(last_chunk_index)
+
+        # 如果有新音频，需要将PCM封装为WAV格式
+        if audio_info.get("has_new_audio"):
+            import base64
+            import wave
+            import io
+
+            try:
+                # 解码Base64得到PCM数据
+                pcm_data = base64.b64decode(audio_info["audio_data"])
+
+                # 将PCM封装为WAV格式
+                wav_buffer = io.BytesIO()
+                with wave.open(wav_buffer, 'wb') as wav_file:
+                    wav_file.setnchannels(audio_info["channels"])
+                    wav_file.setsampwidth(2)  # 16-bit PCM
+                    wav_file.setframerate(audio_info["sample_rate"])
+                    wav_file.writeframes(pcm_data)
+
+                wav_data = wav_buffer.getvalue()
+                wav_base64 = base64.b64encode(wav_data).decode('utf-8')
+
+                logger.info(
+                    f"🎵 返回增量音频: chunk_index {last_chunk_index}→{audio_info['chunk_count']}, "
+                    f"新增 {audio_info['new_audio_size']} bytes, "
+                    f"总计 {audio_info['total_audio_size']} bytes PCM → {len(wav_data)} bytes WAV, "
+                    f"完成={audio_info['is_complete']}"
+                )
+
+                return {
+                    "success": True,
+                    "message": "获取增量音频成功",
+                    "data": {
+                        "has_new_audio": True,
+                        "audio_data": wav_base64,
+                        "chunk_count": audio_info["chunk_count"],
+                        "is_complete": audio_info["is_complete"],
+                        "new_audio_size": audio_info["new_audio_size"],
+                        "total_audio_size": audio_info["total_audio_size"]
+                    }
+                }
+
+            except Exception as e:
+                logger.error(f"封装WAV格式失败: {e}", exc_info=True)
+                return {
+                    "success": False,
+                    "message": f"音频处理失败: {e}",
+                    "data": {
+                        "has_new_audio": False,
+                        "is_complete": audio_info.get("is_complete", False)
+                    }
+                }
+
+        # 没有新音频
+        return {
+            "success": True,
+            "message": "当前没有新音频",
+            "data": {
+                "has_new_audio": False,
+                "chunk_count": audio_info["chunk_count"],
+                "is_complete": audio_info["is_complete"]
+            }
+        }
+
+    except Exception as e:
+        error_msg = f"获取增量音频失败: {e}"
+        logger.error(error_msg, exc_info=True)
+
+        return {
+            "success": False,
+            "message": error_msg,
+            "data": {
+                "has_new_audio": False,
+                "is_complete": False
+            }
+        }
+
+
 @router.get("/health")
 async def voice_health_check():
     """

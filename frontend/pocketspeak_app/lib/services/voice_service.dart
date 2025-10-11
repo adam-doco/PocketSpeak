@@ -296,6 +296,38 @@ class VoiceService {
     }
   }
 
+  /// 获取已完成的句子（用于逐句播放）
+  Future<Map<String, dynamic>> getCompletedSentences({int lastSentenceIndex = 0}) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/voice/conversation/sentences?last_sentence_index=$lastSentenceIndex'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        return {
+          'success': data['success'] ?? false,
+          'message': data['message'] ?? '',
+          'data': data['data'] ?? {},
+        };
+      } else {
+        throw Exception('获取句子失败: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ 获取句子异常: $e');
+      return {
+        'success': false,
+        'message': '获取句子失败: $e',
+        'data': {
+          'has_new_sentences': false,
+          'is_complete': false,
+        },
+      };
+    }
+  }
+
   // ============== 健康检查 ==============
 
   /// 检查语音系统健康状态

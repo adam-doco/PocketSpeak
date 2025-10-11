@@ -23,6 +23,9 @@ class AudioPlayerService {
   /// 获取当前播放的音频ID
   String? get currentAudioId => _currentAudioId;
 
+  /// 获取播放状态流(用于监听播放完成事件)
+  Stream<PlayerState> get playerStateStream => _audioPlayer.playerStateStream;
+
   AudioPlayerService() {
     // 监听播放状态变化
     _audioPlayer.playerStateStream.listen((state) {

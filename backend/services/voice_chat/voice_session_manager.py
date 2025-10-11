@@ -8,7 +8,7 @@ PocketSpeak 语音会话管理器
 import asyncio
 import json
 import logging
-from typing import Optional, Callable, Dict, Any, List
+from typing import Optional, Callable, Dict, Any, List, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
@@ -51,6 +51,9 @@ class VoiceMessage:
     _sample_rate: int = 24000
     _channels: int = 1
     _opus_decoder: Optional[Any] = field(default=None, init=False, repr=False)  # 复用的OPUS解码器(参考py-xiaozhi标准实现)
+    _is_tts_complete: bool = field(default=False, init=False)  # TTS是否完成（收到tts_stop信号）
+    _sentences: List[Dict[str, Any]] = field(default_factory=list, init=False)  # 句子列表: [{"text": "...", "start_chunk": 0, "end_chunk": 5, "is_complete": True}, ...]
+    _current_sentence_start: int = field(default=0, init=False)  # 当前句子的起始chunk索引
 
     def append_audio_chunk(self, audio_data: AudioData):
         """
@@ -102,6 +105,183 @@ class VoiceMessage:
             import logging
             logger = logging.getLogger(__name__)
             logger.warning(f"音频处理失败，跳过此帧: {e}")
+
+    def get_incremental_audio(self, last_chunk_index: int) -> Dict[str, Any]:
+        """
+        获取增量音频数据（用于流式播放）
+
+        Args:
+            last_chunk_index: 前端已获取到的PCM块索引
+
+        Returns:
+            Dict包含:
+            - has_new_audio: 是否有新音频
+            - audio_data: Base64编码的新增PCM数据（如果有）
+            - chunk_count: 当前总块数
+            - is_complete: TTS是否完成
+            - sample_rate: 采样率
+            - channels: 声道数
+        """
+        import base64
+
+        # 检查是否有新的音频块
+        if last_chunk_index < len(self._pcm_chunks):
+            # 获取新增的PCM块
+            new_chunks = self._pcm_chunks[last_chunk_index:]
+            merged_new_pcm = b''.join(new_chunks)
+
+            # 合并从开始到现在的所有PCM（用于覆盖式播放）
+            merged_all_pcm = b''.join(self._pcm_chunks)
+
+            return {
+                "has_new_audio": True,
+                "audio_data": base64.b64encode(merged_all_pcm).decode('utf-8'),  # 返回完整累积音频
+                "new_audio_size": len(merged_new_pcm),
+                "total_audio_size": len(merged_all_pcm),
+                "chunk_count": len(self._pcm_chunks),
+                "is_complete": self._is_tts_complete,
+                "sample_rate": self._sample_rate,
+                "channels": self._channels
+            }
+
+        # 没有新音频
+        return {
+            "has_new_audio": False,
+            "chunk_count": len(self._pcm_chunks),
+            "is_complete": self._is_tts_complete
+        }
+
+    def add_text_sentence(self, text: str):
+        """
+        添加新的文本句子
+        调用时机: 收到AI文本消息时
+        作用:
+        1. 标记上一句的音频已完成,开始新句子
+        2. 追加文本到ai_text字段(用于聊天界面显示完整内容)
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # 如果有上一句,标记其完成
+        if len(self._sentences) > 0 and not self._sentences[-1]["is_complete"]:
+            self._sentences[-1]["end_chunk"] = len(self._pcm_chunks)
+            self._sentences[-1]["is_complete"] = True
+            logger.info(f"✅ 句子音频完成: '{self._sentences[-1]['text']}', chunks [{self._sentences[-1]['start_chunk']}, {self._sentences[-1]['end_chunk']})")
+
+        # 添加新句子
+        new_sentence = {
+            "text": text,
+            "start_chunk": len(self._pcm_chunks),
+            "end_chunk": None,
+            "is_complete": False
+        }
+        self._sentences.append(new_sentence)
+        self._current_sentence_start = len(self._pcm_chunks)
+        logger.info(f"📝 新句子开始: '{text}', start_chunk={self._current_sentence_start}")
+
+        # ✅ 追加文本到ai_text字段(用于聊天界面显示)
+        if self.ai_text:
+            self.ai_text += text
+        else:
+            self.ai_text = text
+
+    def mark_tts_complete(self):
+        """标记TTS完成"""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        self._is_tts_complete = True
+
+        # 标记最后一句完成
+        if len(self._sentences) > 0 and not self._sentences[-1]["is_complete"]:
+            self._sentences[-1]["end_chunk"] = len(self._pcm_chunks)
+            self._sentences[-1]["is_complete"] = True
+            logger.info(f"✅ 最后一句音频完成: '{self._sentences[-1]['text']}', chunks [{self._sentences[-1]['start_chunk']}, {self._sentences[-1]['end_chunk']})")
+
+    def get_completed_sentences(self, last_sentence_index: int) -> Dict[str, Any]:
+        """
+        获取已完成的句子及其音频
+
+        Args:
+            last_sentence_index: 前端已获取到的句子索引
+
+        Returns:
+            {
+                "has_new_sentences": bool,
+                "sentences": [
+                    {
+                        "text": "句子文本",
+                        "audio_data": "base64编码的WAV音频"
+                    },
+                    ...
+                ],
+                "total_sentences": 总句子数,
+                "is_complete": TTS是否完成
+            }
+        """
+        import base64
+        import io
+        import wave
+
+        # 获取新完成的句子
+        completed_sentences = [s for s in self._sentences if s["is_complete"]]
+
+        if last_sentence_index < len(completed_sentences):
+            new_sentences = completed_sentences[last_sentence_index:]
+
+            result_sentences = []
+            for sentence in new_sentences:
+                # 提取这句话的音频chunks
+                start = sentence["start_chunk"]
+                end = sentence["end_chunk"]
+
+                # ✅ 跳过空音频句子(start == end表示没有音频数据)
+                if start == end:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"⚠️ 句子'{sentence['text']}'音频为空(chunks [{start}, {end})),跳过")
+                    continue
+
+                sentence_pcm_chunks = self._pcm_chunks[start:end]
+                sentence_pcm = b''.join(sentence_pcm_chunks)
+
+                # 转换为WAV格式
+                wav_buffer = io.BytesIO()
+                with wave.open(wav_buffer, 'wb') as wav_file:
+                    wav_file.setnchannels(self._channels)
+                    wav_file.setsampwidth(2)  # 16-bit PCM
+                    wav_file.setframerate(self._sample_rate)
+                    wav_file.writeframes(sentence_pcm)
+
+                wav_data = wav_buffer.getvalue()
+                wav_base64 = base64.b64encode(wav_data).decode('utf-8')
+
+                result_sentences.append({
+                    "text": sentence["text"],
+                    "audio_data": wav_base64
+                })
+
+            # ✅ 只有真正有音频的句子才返回
+            if result_sentences:
+                return {
+                    "has_new_sentences": True,
+                    "sentences": result_sentences,
+                    "total_sentences": len(completed_sentences),
+                    "is_complete": self._is_tts_complete
+                }
+            else:
+                # 所有新句子都被过滤了,返回无新句子
+                return {
+                    "has_new_sentences": False,
+                    "total_sentences": len(completed_sentences),
+                    "is_complete": self._is_tts_complete
+                }
+
+        return {
+            "has_new_sentences": False,
+            "total_sentences": len(completed_sentences),
+            "is_complete": self._is_tts_complete
+        }
 
 
 @dataclass
@@ -161,6 +341,10 @@ class VoiceSessionManager:
         # 事件循环引用（用于跨线程提交异步任务）
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
+        # 后台任务管理（参考py-xiaozhi标准实现）
+        self._bg_tasks: Set[asyncio.Task] = set()
+        self._send_audio_semaphore: Optional[asyncio.Semaphore] = None  # 在initialize中创建
+
         # 对话历史
         self.conversation_history: List[VoiceMessage] = []
         self.current_message: Optional[VoiceMessage] = None
@@ -204,6 +388,10 @@ class VoiceSessionManager:
             # 0. 保存事件循环引用
             self._loop = asyncio.get_running_loop()
             logger.info(f"✅ 事件循环已保存: {self._loop}")
+
+            # 0.1 初始化音频发送并发控制（参考py-xiaozhi标准实现）
+            self._send_audio_semaphore = asyncio.Semaphore(10)  # 最多10个并发发送任务
+            logger.info("✅ 音频发送并发控制已初始化 (max_concurrent=10)")
 
             # 1. 检查设备激活状态
             if not self.device_manager.check_activation_status():
@@ -340,27 +528,37 @@ class VoiceSessionManager:
         try:
             logger.info("🎤 开始监听用户语音...")
 
-            # 步骤1：先发送开始监听消息到服务器（遵循py-xiaozhi协议）
-            # 使用AUTO_STOP模式（回合制对话）
-            mode = "auto"  # 可选: "auto"(回合制), "manual"(手动), "realtime"(实时)
-            success = await self.ws_client.send_start_listening(mode)
-            if not success:
-                error_msg = "发送开始监听消息失败"
-                logger.error(error_msg)
-                self._trigger_error(error_msg)
-                return False
-
-            # 步骤2：更新状态
-            self._update_state(SessionState.LISTENING)
-
-            # 步骤3：开始本地录音
+            # 步骤1：先开始本地录音（启动音频流）
+            # 优化：先启动录音再通知服务器，减少服务器等待时间
+            # 参考：py-xiaozhi 在发送 start_listening 前已经启动了音频流
             if not await self.recorder.start_recording():
                 error_msg = "无法开始录音"
                 logger.error(error_msg)
                 self._trigger_error(error_msg)
                 return False
 
-            # 步骤4：创建新的消息对象
+            # 步骤2：清空音频缓冲（参考py-xiaozhi标准实现）
+            # 确保发送的是新鲜的音频数据，不包含旧缓冲
+            await self.recorder.clear_audio_buffers()
+
+            # 步骤3：发送开始监听消息到服务器（遵循py-xiaozhi协议）
+            # 使用MANUAL模式（手动按压，匹配前端的按住说话交互）
+            # 重要：前端使用按住说话/松开停止的交互模式，必须使用 manual 模式
+            # auto 模式会等待 VAD 检测静音，导致延迟
+            mode = "manual"  # 可选: "auto"(VAD自动), "manual"(手动按压), "realtime"(实时打断)
+            success = await self.ws_client.send_start_listening(mode)
+            if not success:
+                # 发送失败，回滚：停止录音
+                await self.recorder.stop_recording()
+                error_msg = "发送开始监听消息失败"
+                logger.error(error_msg)
+                self._trigger_error(error_msg)
+                return False
+
+            # 步骤4：更新状态
+            self._update_state(SessionState.LISTENING)
+
+            # 步骤5：创建新的消息对象
             self.current_message = VoiceMessage(
                 message_id=f"msg_{int(datetime.now().timestamp() * 1000)}",
                 timestamp=datetime.now()
@@ -393,19 +591,31 @@ class VoiceSessionManager:
             return False
 
         try:
+            import time
+            t0 = time.time()
             logger.info("⏹️ 停止监听用户语音...")
 
             # 步骤1：停止本地录音
             await self.recorder.stop_recording()
+            t1 = time.time()
+            logger.info(f"⏱️ 停止录音耗时: {(t1-t0)*1000:.0f}ms")
 
             # 步骤2：发送停止监听消息到服务器（遵循py-xiaozhi协议）
             success = await self.ws_client.send_stop_listening()
+            t2 = time.time()
+            logger.info(f"⏱️ 发送stop_listening耗时: {(t2-t1)*1000:.0f}ms")
+
             if not success:
                 logger.warning("发送停止监听消息失败，但本地录音已停止")
 
             # 步骤3：更新状态为处理中
             self._update_state(SessionState.PROCESSING)
-            logger.info("✅ 停止监听，等待AI响应...")
+
+            # 🔥 记录时间戳，用于计算延迟
+            self._stop_listening_time = time.time()
+            self._first_audio_received = False  # 重置标志
+
+            logger.info(f"✅ 停止监听完成，等待AI响应... (总耗时: {(t2-t0)*1000:.0f}ms)")
 
             return True
 
@@ -464,6 +674,17 @@ class VoiceSessionManager:
         self._update_state(SessionState.CLOSED)
 
         try:
+            # 取消所有后台任务（参考py-xiaozhi标准实现）
+            if self._bg_tasks:
+                logger.info(f"取消 {len(self._bg_tasks)} 个后台任务...")
+                for task in self._bg_tasks:
+                    task.cancel()
+
+                # 等待任务结束
+                await asyncio.gather(*self._bg_tasks, return_exceptions=True)
+                self._bg_tasks.clear()
+                logger.info("✅ 后台任务已清理")
+
             # 停止录音
             if self.recorder.is_recording:
                 await self.recorder.stop_recording()
@@ -477,7 +698,7 @@ class VoiceSessionManager:
                 await self.ws_client.disconnect()
 
             # 清理资源
-            await self.recorder.cleanup()
+            await self.recorder.close()  # 修复：SpeechRecorder 使用 close() 不是 cleanup()
             await self.player.cleanup()
 
             self.is_initialized = False
@@ -516,21 +737,57 @@ class VoiceSessionManager:
 
     def _on_audio_encoded(self, audio_data: bytes):
         """
-        当音频编码完成时的回调
-        注意：此方法由录音线程调用，需要使用线程安全的方式提交到事件循环
+        当音频编码完成时的回调（优化版 - 参考py-xiaozhi标准实现）
+
+        注意：此方法由音频硬件驱动线程调用，需要使用线程安全的方式提交到事件循环
+
+        优化说明：
+        1. 使用 call_soon_threadsafe 替代 run_coroutine_threadsafe（减少调度开销）
+        2. 添加并发控制信号量（避免任务风暴）
+        3. 统一管理后台任务（避免内存泄漏）
+
+        参考：libs/py_xiaozhi/src/application.py:388-412
         """
         try:
             if self._loop and not self._loop.is_closed():
-                # 使用run_coroutine_threadsafe将协程提交到事件循环
-                future = asyncio.run_coroutine_threadsafe(
-                    self.ws_client.send_audio(audio_data),
-                    self._loop
+                # 🟢 使用 call_soon_threadsafe 跨线程调度（参考py-xiaozhi）
+                self._loop.call_soon_threadsafe(
+                    self._schedule_audio_send_task, audio_data
                 )
-                # 不等待结果，让它在后台运行
             else:
                 logger.error("事件循环不可用，无法发送音频数据")
         except Exception as e:
-            logger.error(f"发送音频数据失败: {e}")
+            logger.error(f"调度音频发送任务失败: {e}")
+
+    def _schedule_audio_send_task(self, audio_data: bytes):
+        """
+        在主事件循环中创建音频发送任务（参考py-xiaozhi标准实现）
+
+        此方法由 _on_audio_encoded 通过 call_soon_threadsafe 调度，
+        确保在主事件循环中执行，可以安全地创建异步任务。
+
+        参考：libs/py_xiaozhi/src/application.py:397-412
+        """
+        try:
+            # 并发限制，避免任务风暴
+            async def _send():
+                async with self._send_audio_semaphore:
+                    await self.ws_client.send_audio(audio_data)
+
+            # 创建后台任务
+            task = asyncio.create_task(_send())
+            self._bg_tasks.add(task)
+
+            # 任务完成后从集合中移除
+            def done_callback(t):
+                self._bg_tasks.discard(t)
+                if not t.cancelled() and t.exception():
+                    logger.error(f"音频发送任务异常: {t.exception()}", exc_info=True)
+
+            task.add_done_callback(done_callback)
+
+        except Exception as e:
+            logger.error(f"创建音频发送任务失败: {e}", exc_info=True)
 
     def _on_recording_started(self):
         """当录音开始时的回调"""
@@ -558,17 +815,44 @@ class VoiceSessionManager:
             parsed_response = self.parser.parse_message(message)
 
             if parsed_response:
+                # ⭐ 特殊处理：STT消息（用户语音识别结果）
+                if parsed_response.message_type == MessageType.STT:
+                    if self.current_message and parsed_response.text_content:
+                        # 立即保存用户文字
+                        self.current_message.user_text = parsed_response.text_content
+                        logger.info(f"✅ 用户语音识别结果: {parsed_response.text_content}")
+
+                        # 触发用户说话结束回调
+                        if self.on_user_speech_end:
+                            self.on_user_speech_end(parsed_response.text_content)
+
+                        # ⭐ 关键：立即保存用户消息到历史记录，前端轮询就能立即获取
+                        if self.config.save_conversation:
+                            logger.info(f"💾 立即保存用户消息到历史记录")
+                            self._save_to_history(self.current_message)
+
+                    return  # STT消息处理完毕，不继续后续逻辑
+
                 # 触发AI响应回调
                 if self.on_ai_response_received:
                     self.on_ai_response_received(parsed_response)
 
                 # 更新当前消息
                 if self.current_message:
-                    if parsed_response.text_content:
-                        self.current_message.ai_text = parsed_response.text_content
+                    # ⚠️ 注意：文本内容通过 _on_text_received 回调处理，这里不再直接更新
+                    # 避免重复追加导致文本显示两遍
                     if parsed_response.audio_data:
                         # 使用append方法累积音频数据
                         self.current_message.append_audio_chunk(parsed_response.audio_data)
+
+                        # 🔥 关键：记录第一帧音频到达时间
+                        if not hasattr(self, '_first_audio_received'):
+                            self._first_audio_received = True
+                            if hasattr(self, '_stop_listening_time'):
+                                import time
+                                delay = (time.time() - self._stop_listening_time) * 1000
+                                logger.info(f"⏱️⏱️⏱️ 【关键延迟】从stop_listening到收到第一帧音频: {delay:.0f}ms")
+
                         logger.info(f"📦 累积音频数据: +{parsed_response.audio_data.size} bytes, 总计: {self.current_message.ai_audio.size if self.current_message.ai_audio else 0} bytes")
                     self.current_message.message_type = parsed_response.message_type
 
@@ -581,6 +865,8 @@ class VoiceSessionManager:
 
                     if is_tts_stop:
                         logger.info(f"🛑 收到TTS stop信号，AI回复完成，保存完整音频到历史记录")
+                        # 标记TTS完成（用于增量音频API）
+                        self.current_message.mark_tts_complete()
                         if self.config.save_conversation:
                             logger.info(f"💾 保存对话到历史记录 (音频: {self.current_message.ai_audio.size if self.current_message.ai_audio else 0} bytes)")
                             self._save_to_history(self.current_message)
@@ -610,12 +896,24 @@ class VoiceSessionManager:
         """当收到文本消息时的回调"""
         logger.info(f"📝 收到文本: {text}")
 
-        # 注意：不再在这里保存历史记录
-        # 历史记录的保存已移到收到Emoji消息时（AI回复完成标志）
-        # 这样确保保存的是完整的音频数据，而不是部分数据
+        # 🔥 关键逻辑：判断这是用户的语音识别结果还是AI的回复
+        if self.current_message:
+            # 如果current_message还没有user_text,说明这是用户的语音识别结果
+            if self.current_message.user_text is None:
+                self.current_message.user_text = text
+                logger.info(f"✅ 用户语音识别结果: {text}")
 
-        if self.on_user_speech_end:
-            self.on_user_speech_end(text)
+                # 触发用户说话结束回调
+                if self.on_user_speech_end:
+                    self.on_user_speech_end(text)
+            else:
+                # 已经有user_text,说明这是AI的回复文本
+                self.current_message.add_text_sentence(text)
+                logger.info(f"🤖 AI回复句子: {text}")
+
+        # 注意：不再在这里保存历史记录
+        # 历史记录的保存已移到收到TTS stop信号时（AI回复完成标志）
+        # 这样确保保存的是完整的音频数据，而不是部分数据
 
     def _on_audio_received(self, audio_data: AudioData):
         """

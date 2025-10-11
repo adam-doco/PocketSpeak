@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:just_audio/just_audio.dart';
 import '../services/api_service.dart';
 import '../services/voice_service.dart';
 import '../services/audio_player_service.dart';
@@ -45,6 +46,9 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage>
     with TickerProviderStateMixin {
+  // 🔧 日志开关（生产环境设为false）
+  static const bool _enableDebugLogs = true;
+
   final List<ChatMessage> _messages = [];
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -70,11 +74,26 @@ class _ChatPageState extends State<ChatPage>
   // 轮询定时器
   Timer? _statusPollingTimer;
 
+  // 逐句播放相关
+  Timer? _sentencePollingTimer;  // 句子轮询定时器
+  int _lastSentenceIndex = 0;  // 上次获取到的句子索引
+  List<Map<String, String>> _sentenceQueue = [];  // 句子队列: [{text, audioData}, ...]
+  bool _isPlayingSentences = false;  // 是否正在播放句子队列
+  StreamSubscription? _playbackSubscription;  // 播放完成监听器
+  String? _lastProcessedMessageId;  // 上次处理过的消息ID(用于避免重复添加用户消息)
+
   @override
   void initState() {
     super.initState();
     _setupAnimations();
     _initializeVoiceSession();
+  }
+
+  /// 统一的日志输出方法
+  void _debugLog(String message) {
+    if (_enableDebugLogs) {
+      print(message);
+    }
   }
 
   void _setupAnimations() {
@@ -156,65 +175,72 @@ class _ChatPageState extends State<ChatPage>
     }
   }
 
+  /// 检查新消息（提取为独立方法，可以立即调用）
+  Future<void> _checkForNewMessages() async {
+    // ⚠️ 注意：AI消息现在通过逐句播放机制实时显示，不再从历史记录获取
+    // 但需要从历史记录获取用户语音识别的文字
+
+    // 查询对话历史，获取新消息
+    final historyResult = await _voiceService.getConversationHistory(limit: 1);
+
+    if (historyResult['success'] == true) {
+      final messages = historyResult['messages'] as List;
+
+      if (messages.isEmpty) {
+        return; // 静默返回，减少日志噪音
+      }
+
+      // 检查是否有用户文字需要显示（语音识别结果）
+      if (messages.isNotEmpty) {
+        final latestMessage = messages.first;
+        final messageId = latestMessage['message_id'] as String?;
+
+        // ✅ 关键修复：通过message_id判断是否已处理，避免重复添加
+        if (messageId != null &&
+            messageId != _lastProcessedMessageId &&
+            latestMessage['user_text'] != null) {
+          final userText = latestMessage['user_text'] as String;
+
+          setState(() {
+            _messages.add(ChatMessage(
+              messageId: messageId,
+              text: userText,
+              isUser: true,
+              timestamp: DateTime.now(),
+            ));
+          });
+
+          // 记录已处理的消息ID
+          _lastProcessedMessageId = messageId;
+          _scrollToBottom();
+
+          // ✅ 只在实际添加用户消息时打印日志
+          _debugLog('✅ 添加用户语音识别文字: $userText (message_id: $messageId)');
+        }
+      }
+    }
+
+    // 更新会话状态
+    final statusResult = await _voiceService.getSessionStatus();
+    if (statusResult['success'] == true) {
+      setState(() {
+        _sessionState = statusResult['data']?['state'] ?? _sessionState;
+      });
+    }
+  }
+
   /// 启动状态轮询（监听AI响应）
   void _startStatusPolling() {
-    // 每2秒查询一次会话状态
-    _statusPollingTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
+    // 每0.3秒查询一次会话状态（优化响应速度）
+    // 从2秒减少到0.3秒，减少平均等待时间从1秒到150ms
+    _statusPollingTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) async {
       if (!_isSessionInitialized) {
         timer.cancel();
         return;
       }
 
-      // 查询对话历史，获取新消息
-      final historyResult = await _voiceService.getConversationHistory(limit: 1);
-
-      if (historyResult['success'] == true) {
-        final messages = historyResult['messages'] as List;
-
-        // 如果有新消息且是AI回复，添加到消息列表
-        if (messages.isNotEmpty) {
-          final latestMessage = messages.first;
-          final messageId = latestMessage['message_id'];
-
-          // 检查是否已存在
-          final exists = _messages.any((msg) => msg.messageId == messageId);
-
-          if (!exists && latestMessage['ai_text'] != null) {
-            final aiMessage = ChatMessage.fromJson(latestMessage);
-
-            setState(() {
-              _messages.add(aiMessage);
-              _isProcessing = false;
-            });
-
-            _typingController.stop();
-            _scrollToBottom();
-
-            // 如果有音频数据，自动播放
-            if (aiMessage.hasAudio && aiMessage.audioData != null) {
-              print('🔊 检测到AI音频回复，准备播放...');
-              _audioPlayerService.playBase64Audio(
-                aiMessage.audioData!,
-                audioId: aiMessage.messageId,
-              ).then((success) {
-                if (success) {
-                  print('✅ AI音频播放成功');
-                } else {
-                  print('❌ AI音频播放失败');
-                }
-              });
-            }
-          }
-        }
-      }
-
-      // 更新会话状态
-      final statusResult = await _voiceService.getSessionStatus();
-      if (statusResult['success'] == true) {
-        setState(() {
-          _sessionState = statusResult['data']?['state'] ?? _sessionState;
-        });
-      }
+      // 调用提取的检查新消息方法
+      await _checkForNewMessages();
     });
   }
 
@@ -239,6 +265,9 @@ class _ChatPageState extends State<ChatPage>
     }
 
     try {
+      final t0 = DateTime.now();
+      print('⏱️ [${t0.toIso8601String()}] 用户开始录音');
+
       setState(() {
         _listeningText = "正在连接...";
       });
@@ -275,8 +304,13 @@ class _ChatPageState extends State<ChatPage>
     if (!_isRecording) return;
 
     try {
+      final t0 = DateTime.now();
+      print('⏱️ [${t0.toIso8601String()}] 用户点击停止录音');
+
       // 调用后端停止录音API
       final result = await _voiceService.stopRecording();
+      final t1 = DateTime.now();
+      print('⏱️ 后端stop_recording API耗时: ${t1.difference(t0).inMilliseconds}ms');
 
       setState(() {
         _isRecording = false;
@@ -293,6 +327,14 @@ class _ChatPageState extends State<ChatPage>
           _isProcessing = true;
         });
         _typingController.repeat();
+
+        // ✅ 启动逐句播放轮询（在这里启动，收到AI消息时不再重复启动）
+        print('🎵 启动逐句播放轮询...');
+        _startSentencePlayback();
+
+        // 立即检查一次新消息（不等轮询定时器）
+        // 这样可以更快地获取AI响应，减少延迟
+        _checkForNewMessages();
       } else {
         _showSnackBar('停止录音失败: ${result['message']}');
       }
@@ -355,7 +397,9 @@ class _ChatPageState extends State<ChatPage>
   }
 
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // 使用Future.delayed确保在Widget完全渲染后滚动
+    // 这样可以获取正确的maxScrollExtent
+    Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
@@ -393,9 +437,145 @@ class _ChatPageState extends State<ChatPage>
     );
   }
 
+  /// 启动逐句播放(100ms轮询)
+  void _startSentencePlayback() {
+    print('🎵 启动逐句播放轮询...');
+
+    _lastSentenceIndex = 0;
+    _sentenceQueue.clear();
+    _isPlayingSentences = false;  // ✅ 初始化为false,允许第一句开始播放
+
+    // 每300ms轮询新完成的句子（降低频率减少系统负担）
+    _sentencePollingTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) async {
+      try {
+        final result = await _voiceService.getCompletedSentences(
+          lastSentenceIndex: _lastSentenceIndex,
+        );
+
+        if (result['success'] == true) {
+          final data = result['data'];
+          final hasNewSentences = data['has_new_sentences'] ?? false;
+          final isComplete = data['is_complete'] ?? false;
+
+          if (hasNewSentences) {
+            final sentences = data['sentences'] as List<dynamic>;
+
+            for (var sentence in sentences) {
+              final text = sentence['text'] as String;
+              final audioData = sentence['audio_data'] as String;
+
+              _debugLog('📝 收到新句子: $text');
+
+              // ✅ 每句话创建一个独立的AI消息气泡
+              final aiMessage = ChatMessage(
+                messageId: 'ai_${DateTime.now().millisecondsSinceEpoch}',
+                text: text,  // ✅ 只显示当前句子，不累积
+                isUser: false,
+                timestamp: DateTime.now(),
+                hasAudio: true,
+              );
+
+              setState(() {
+                _messages.add(aiMessage);
+                _isProcessing = false;
+              });
+
+              _typingController.stop();
+              _scrollToBottom();
+
+              _debugLog('✅ 创建AI消息气泡: $text');
+
+              // 添加到播放队列
+              _sentenceQueue.add({
+                'text': text,
+                'audioData': audioData,
+              });
+            }
+
+            // 更新索引
+            _lastSentenceIndex = data['total_sentences'];
+
+            // 立即启动播放（无论是否正在播放，新句子加入队列后会自动续播）
+            if (!_isPlayingSentences) {
+              _playNextSentence();
+            }
+          }
+
+          // TTS完成,停止轮询
+          if (isComplete) {
+            _debugLog('🛑 TTS完成,停止句子轮询');
+            timer.cancel();
+            _sentencePollingTimer = null;
+          }
+        }
+      } catch (e) {
+        _debugLog('❌ 获取句子失败: $e');
+      }
+    });
+  }
+
+  /// 播放下一句
+  void _playNextSentence() async {
+    if (_sentenceQueue.isEmpty) {
+      _debugLog('✅ 句子队列已空,播放完成');
+      _isPlayingSentences = false;
+      return;
+    }
+
+    _isPlayingSentences = true;
+    final sentence = _sentenceQueue.removeAt(0);
+    final text = sentence['text']!;
+    final audioData = sentence['audioData']!;
+
+    _debugLog('🔊 开始播放句子: $text');
+
+    final playSuccess = await _audioPlayerService.playBase64Audio(
+      audioData,
+      audioId: 'sentence_${DateTime.now().millisecondsSinceEpoch}',
+    );
+
+    if (playSuccess) {
+      // 监听播放完成,播放下一句
+      _waitForPlaybackEnd();
+    } else {
+      _debugLog('❌ 播放失败,继续下一句');
+      _playNextSentence();
+    }
+  }
+
+  /// 等待当前句子播放完成
+  void _waitForPlaybackEnd() {
+    // 取消之前的监听器(如果存在)
+    _playbackSubscription?.cancel();
+
+    // 监听音频播放器的状态流,等待播放完成
+    _playbackSubscription = _audioPlayerService.playerStateStream.listen((state) {
+      // 当播放完成时,播放下一句
+      if (state.processingState == ProcessingState.completed) {
+        _debugLog('✅ 句子播放完成,播放下一句');
+        _playbackSubscription?.cancel();
+        _playNextSentence();
+      }
+    });
+  }
+
+  /// 停止逐句播放
+  void _stopSentencePlayback() {
+    _sentencePollingTimer?.cancel();
+    _sentencePollingTimer = null;
+    _playbackSubscription?.cancel();  // 取消播放完成监听
+    _playbackSubscription = null;
+    _isPlayingSentences = false;
+    _sentenceQueue.clear();
+    _lastSentenceIndex = 0;
+    print('🛑 逐句播放已停止');
+  }
+
   @override
   void dispose() {
     _statusPollingTimer?.cancel();
+    _sentencePollingTimer?.cancel();  // 取消逐句播放轮询
+    _playbackSubscription?.cancel();  // 取消播放完成监听
     _pulseController.dispose();
     _typingController.dispose();
     _textController.dispose();
@@ -573,7 +753,7 @@ class _ChatPageState extends State<ChatPage>
 
   Widget _buildMessageBubble(ChatMessage message) {
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4),
+      margin: const EdgeInsets.symmetric(vertical: 2),  // ✅ 缩短气泡间距: 4 → 2
       child: Row(
         mainAxisAlignment: message.isUser
             ? MainAxisAlignment.end
@@ -584,7 +764,7 @@ class _ChatPageState extends State<ChatPage>
               constraints: BoxConstraints(
                 maxWidth: MediaQuery.of(context).size.width * 0.7,
               ),
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),  // ✅ 缩短内部间距: all(16) → h:12, v:8
               decoration: BoxDecoration(
                 gradient: message.isUser
                     ? const LinearGradient(
@@ -613,7 +793,7 @@ class _ChatPageState extends State<ChatPage>
                 style: TextStyle(
                   fontSize: 14,
                   color: message.isUser ? Colors.white : const Color(0xFF2D3436),
-                  height: 1.4,
+                  height: 1.3,  // ✅ 缩短行高: 1.4 → 1.3
                 ),
               ),
             ),
@@ -702,56 +882,6 @@ class _ChatPageState extends State<ChatPage>
       ),
       child: Column(
         children: [
-          // 录音状态提示
-          if (_isRecording || _listeningText.isNotEmpty) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(8),
-              margin: const EdgeInsets.only(bottom: 8),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    const Color(0xFF00d4aa).withValues(alpha: 0.1),
-                    const Color(0xFF00c4a7).withValues(alpha: 0.1),
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: const Color(0xFF00d4aa).withValues(alpha: 0.3),
-                ),
-              ),
-              child: Row(
-                children: [
-                  AnimatedBuilder(
-                    animation: _pulseAnimation,
-                    builder: (context, child) {
-                      return Transform.scale(
-                        scale: _pulseAnimation.value,
-                        child: Container(
-                          width: 16,
-                          height: 16,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF00d4aa),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    _listeningText,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Color(0xFF00d4aa),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-
           // 输入区域
           Container(
             padding: const EdgeInsets.only(left: 4, right: 4, top: 14, bottom: 6),

@@ -309,6 +309,12 @@ class XiaozhiWebSocketClient:
             message_json = json.dumps(message, ensure_ascii=False)
             await self.websocket.send(message_json)
 
+            # 临时调试：记录开始监听时间点
+            import time
+            self._listening_start_time = time.time()
+            # 重置音频帧计数（用于追踪本轮对话）
+            self._audio_frames_this_session = 0
+
             logger.info(f"📤 发送开始监听消息: mode={mode}, session_id={self.session_id}")
             return True
 
@@ -345,7 +351,15 @@ class XiaozhiWebSocketClient:
             message_json = json.dumps(message, ensure_ascii=False)
             await self.websocket.send(message_json)
 
-            logger.info(f"📤 发送停止监听消息: session_id={self.session_id}")
+            # 临时调试：统计本轮发送的音频
+            import time
+            total_frames = getattr(self, '_audio_frames_this_session', 0)
+            if hasattr(self, '_listening_start_time'):
+                duration = (time.time() - self._listening_start_time) * 1000
+                logger.info(f"📤 发送停止监听消息 | 本轮统计: 共发送 {total_frames} 帧音频, 录音时长: {duration:.0f}ms")
+            else:
+                logger.info(f"📤 发送停止监听消息 | 本轮统计: 共发送 {total_frames} 帧音频")
+
             return True
 
         except Exception as e:
@@ -377,6 +391,20 @@ class XiaozhiWebSocketClient:
             # 发送二进制音频数据
             await self.websocket.send(audio_data)
             self.stats["messages_sent"] += 1
+
+            # 临时调试：追踪本轮对话的音频发送
+            if not hasattr(self, '_audio_frames_this_session'):
+                self._audio_frames_this_session = 0
+            self._audio_frames_this_session += 1
+
+            # 每10帧打印一次，验证音频是否实时发送
+            if self._audio_frames_this_session % 10 == 0:
+                import time
+                if hasattr(self, '_listening_start_time'):
+                    elapsed = (time.time() - self._listening_start_time) * 1000
+                    logger.info(f"📤 [实时发送] 本轮已发送 {self._audio_frames_this_session} 帧 (+{len(audio_data)}B) | 录音进行中: {elapsed:.0f}ms")
+                else:
+                    logger.info(f"📤 [实时发送] 本轮已发送 {self._audio_frames_this_session} 帧 (+{len(audio_data)}B)")
 
             logger.debug(f"📤 发送音频数据: {len(audio_data)} bytes")
             return True

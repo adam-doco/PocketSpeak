@@ -25,6 +25,7 @@ class MessageType(Enum):
     AUDIO = "audio"         # 音频消息
     MCP = "mcp"            # MCP协议消息
     TTS = "tts"            # TTS语音合成消息
+    STT = "stt"            # STT语音识别消息（用户说话的识别结果）
     EMOJI = "emoji"        # Emoji表情消息(AI回复结束标志)
     ERROR = "error"        # 错误消息
     UNKNOWN = "unknown"    # 未知消息类型
@@ -128,6 +129,11 @@ class AIResponseParser:
                 self._parse_emoji_message(message_dict, response)
                 logger.info(f"😊 收到Emoji消息 (AI回复结束标志): {message_dict.get('text')} - {message_dict.get('emotion')}")
 
+            elif message_type == MessageType.STT:
+                self._parse_stt_message(message_dict, response)
+                self.stats["text_messages"] += 1
+                logger.info(f">> 用户说: {message_dict.get('text')}")
+
             elif message_type == MessageType.MCP:
                 self._parse_mcp_message(message_dict, response)
                 self.stats["mcp_messages"] += 1
@@ -203,6 +209,10 @@ class AIResponseParser:
         if "error" in message or message.get("type") == "error":
             return MessageType.ERROR
 
+        # 检查是否为STT消息（用户语音识别结果）
+        if self._is_stt_message(message):
+            return MessageType.STT
+
         # 检查是否为Emoji消息(AI回复结束标志)
         if self._is_emoji_message(message):
             return MessageType.EMOJI
@@ -224,6 +234,13 @@ class AIResponseParser:
             return MessageType.TEXT
 
         return MessageType.UNKNOWN
+
+    def _is_stt_message(self, message: Dict) -> bool:
+        """
+        检查是否为STT消息（用户语音识别结果）
+        格式: {"type": "stt", "text": "用户说的话"}
+        """
+        return message.get("type") == "stt"
 
     def _is_emoji_message(self, message: Dict) -> bool:
         """
@@ -340,6 +357,26 @@ class AIResponseParser:
             logger.debug(f"解析Emoji消息: {emoji} ({emotion})")
         except Exception as e:
             logger.error(f"解析Emoji消息失败: {e}")
+
+    def _parse_stt_message(self, message: Dict, response: AIResponse):
+        """
+        解析STT消息（用户语音识别结果）
+        格式: {"type": "stt", "text": "用户说的话"}
+
+        这是小智AI返回的用户语音识别结果，需要立即显示到界面
+        """
+        try:
+            # 提取用户说的文本
+            text = message.get("text", "")
+
+            if text:
+                response.text_content = text
+                logger.debug(f"解析STT消息: {text}")
+            else:
+                logger.warning("STT消息中没有文本内容")
+
+        except Exception as e:
+            logger.error(f"解析STT消息失败: {e}")
 
     def _parse_mcp_message(self, message: Dict, response: AIResponse):
         """解析MCP消息"""

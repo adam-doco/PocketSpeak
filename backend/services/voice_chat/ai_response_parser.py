@@ -445,8 +445,10 @@ class AIResponseParser:
                 self.on_response_parsed(response)
 
             # 文本内容回调
+            # 🔥 关键修复：STT消息不触发on_text_received，由_on_ws_message_received的STT分支专门处理
             if response.text_content and self.on_text_received:
-                self.on_text_received(response.text_content)
+                if response.message_type != MessageType.STT:
+                    self.on_text_received(response.text_content)
 
             # 音频数据回调
             if response.audio_data and self.on_audio_received:

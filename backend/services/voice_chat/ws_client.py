@@ -293,6 +293,10 @@ class XiaozhiWebSocketClient:
             logger.warning("WebSocket未认证，无法发送开始监听消息")
             return False
 
+        if not self.websocket or self.websocket.closed:
+            logger.error("WebSocket连接不存在或已关闭，无法发送开始监听消息")
+            return False
+
         if not self.session_id:
             logger.error("Session ID为空，无法发送开始监听消息")
             return False
@@ -334,6 +338,10 @@ class XiaozhiWebSocketClient:
         """
         if self.state != ConnectionState.AUTHENTICATED:
             logger.warning("WebSocket未认证，无法发送停止监听消息")
+            return False
+
+        if not self.websocket or self.websocket.closed:
+            logger.error("WebSocket连接不存在或已关闭，无法发送停止监听消息")
             return False
 
         if not self.session_id:
@@ -503,7 +511,6 @@ class XiaozhiWebSocketClient:
                     elif isinstance(message, bytes):
                         # 二进制消息 - OPUS音频数据
                         self.stats["messages_received"] += 1
-                        logger.info(f"📥 收到二进制音频数据: {len(message)} bytes")
 
                         # 触发音频接收回调
                         if self.on_message_received:
@@ -515,7 +522,6 @@ class XiaozhiWebSocketClient:
                                 "channels": 1,
                                 "data": message  # 原始二进制数据
                             }
-                            logger.info(f"📤 传递音频消息给解析器: type={audio_message['type']}, format={audio_message['format']}, size={len(message)} bytes")
                             self.on_message_received(audio_message)
 
                 except json.JSONDecodeError as e:

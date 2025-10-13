@@ -804,25 +804,59 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close()
             return
 
-        # 设置回调函数推送消息到前端
-        def on_ai_response(response):
+        # 🚀 设置回调函数推送消息到前端（完全模仿py-xiaozhi）
+        def on_user_text_received(text: str):
+            """收到用户语音识别文字立即推送"""
+            logger.info(f"📝 推送用户文字: {text}")
             asyncio.create_task(websocket.send_json({
-                "type": "ai_response",
-                "data": {
-                    "text": response.text_content,
-                    "has_audio": response.audio_data is not None,
-                    "message_type": response.message_type.value
-                }
+                "type": "user_text",
+                "data": text
+            }))
+
+        def on_text_received(text: str):
+            """收到AI文本立即推送"""
+            # ✅ 保留关键文本日志（低频）
+            logger.info(f"📝 推送AI文本: {text}")
+            asyncio.create_task(websocket.send_json({
+                "type": "text",
+                "data": text
             }))
 
         def on_state_change(state):
+            """状态变化推送"""
+            # ✅ 保留关键状态日志（低频）
+            logger.debug(f"🔄 状态变化: {state.value}")
             asyncio.create_task(websocket.send_json({
                 "type": "state_change",
                 "data": {"state": state.value}
             }))
 
-        session.on_ai_response_received = on_ai_response
-        session.on_state_changed = on_state_change
+        def on_audio_frame(audio_data: bytes):
+            """收到音频帧立即推送（模仿py-xiaozhi的即时播放）"""
+            import base64
+            try:
+                # 🔥 关键修复：使用 run_coroutine_threadsafe 确保任务真正执行
+                loop = asyncio.get_event_loop()
+
+                async def _send():
+                    try:
+                        await websocket.send_json({
+                            "type": "audio_frame",
+                            "data": base64.b64encode(audio_data).decode('utf-8')
+                        })
+                        logger.debug(f"✅ 音频帧已推送: {len(audio_data)} bytes")
+                    except Exception as e:
+                        logger.error(f"❌ WebSocket发送音频帧失败: {e}")
+
+                asyncio.run_coroutine_threadsafe(_send(), loop)
+            except Exception as e:
+                logger.error(f"❌ on_audio_frame 回调失败: {e}", exc_info=True)
+
+        # 🚀 注册回调（纯WebSocket推送，无轮询）
+        session.on_user_speech_end = on_user_text_received  # 用户文字推送
+        session.on_text_received = on_text_received  # AI文本推送
+        session.on_state_changed = on_state_change  # 状态推送
+        session.on_audio_frame_received = on_audio_frame  # 音频帧推送
 
         # 保持连接并处理消息
         while True:

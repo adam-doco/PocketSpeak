@@ -47,6 +47,15 @@ dependencies:
   # Audio playback for OPUS audio from AI responses (supports OPUS on iOS)
   just_audio: ^0.9.36
 
+  # WebSocket for real-time audio streaming
+  web_socket_channel: ^2.4.0
+
+  # Path provider for temp file access
+  path_provider: ^2.1.1
+
+  # Flutter Sound for PCM streaming audio playback
+  flutter_sound: ^9.2.13
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

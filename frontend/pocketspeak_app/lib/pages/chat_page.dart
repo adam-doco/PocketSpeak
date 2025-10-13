@@ -5,6 +5,7 @@ import 'package:just_audio/just_audio.dart';
 import '../services/api_service.dart';
 import '../services/voice_service.dart';
 import '../services/audio_player_service.dart';
+import '../services/seamless_audio_player.dart';  // 🚀 无缝音频播放器（借鉴Zoev4架构）
 
 class ChatMessage {
   final String messageId;
@@ -57,6 +58,7 @@ class _ChatPageState extends State<ChatPage>
   final VoiceService _voiceService = VoiceService();
   final ApiService _apiService = ApiService();
   final AudioPlayerService _audioPlayerService = AudioPlayerService();
+  final SeamlessAudioPlayer _streamingPlayer = SeamlessAudioPlayer();  // 🚀 无缝音频播放器
 
   // 状态管理
   bool _isSessionInitialized = false;
@@ -64,6 +66,7 @@ class _ChatPageState extends State<ChatPage>
   bool _isProcessing = false;
   String _listeningText = "";
   String _sessionState = "idle";
+  bool _useStreamingPlayback = false;  // 🚀 是否使用流式播放（WebSocket推送）
 
   // 动画控制器
   late AnimationController _pulseController;
@@ -71,22 +74,89 @@ class _ChatPageState extends State<ChatPage>
   late AnimationController _typingController;
   late Animation<double> _typingAnimation;
 
-  // 轮询定时器
-  Timer? _statusPollingTimer;
-
-  // 逐句播放相关
-  Timer? _sentencePollingTimer;  // 句子轮询定时器
-  int _lastSentenceIndex = 0;  // 上次获取到的句子索引
-  List<Map<String, String>> _sentenceQueue = [];  // 句子队列: [{text, audioData}, ...]
-  bool _isPlayingSentences = false;  // 是否正在播放句子队列
-  StreamSubscription? _playbackSubscription;  // 播放完成监听器
-  String? _lastProcessedMessageId;  // 上次处理过的消息ID(用于避免重复添加用户消息)
+  // ❌ 删除旧逻辑: 不再使用轮询和逐句播放队列
+  // Timer? _statusPollingTimer;
+  // Timer? _sentencePollingTimer;
+  // int _lastSentenceIndex = 0;
+  // List<Map<String, String>> _sentenceQueue = [];
+  // bool _isPlayingSentences = false;
+  // bool _isPolling = false;
+  // StreamSubscription? _playbackSubscription;
+  // String? _lastProcessedMessageId;
 
   @override
   void initState() {
     super.initState();
     _setupAnimations();
     _initializeVoiceSession();
+  }
+
+  /// 🚀 设置WebSocket回调（模仿py-xiaozhi的即时播放）
+  void _setupWebSocketCallbacks() {
+    // 收到音频帧立即播放
+    _voiceService.onAudioFrameReceived = (String base64Data) {
+      // ✅ 精简日志：删除高频音频帧日志
+      _streamingPlayer.addAudioFrame(base64Data);
+    };
+
+    // 收到用户语音识别文字
+    _voiceService.onUserTextReceived = (String text) {
+      _debugLog('📝 [WebSocket] 收到用户文字: $text');
+
+      if (_useStreamingPlayback) {
+        setState(() {
+          final userMessage = ChatMessage(
+            messageId: 'user_${DateTime.now().millisecondsSinceEpoch}',
+            text: text,
+            isUser: true,
+            timestamp: DateTime.now(),
+          );
+          _messages.add(userMessage);
+        });
+        _scrollToBottom();
+      }
+    };
+
+    // 收到AI文本立即显示
+    _voiceService.onTextReceived = (String text) {
+      // ✅ 保留关键文本日志（低频）
+      _debugLog('📝 [WebSocket] 收到AI文本: $text');
+
+      // 🚀 只在流式模式下显示（避免与轮询重复）
+      if (_useStreamingPlayback) {
+        setState(() {
+          final aiMessage = ChatMessage(
+            messageId: 'ai_${DateTime.now().millisecondsSinceEpoch}',
+            text: text,
+            isUser: false,
+            timestamp: DateTime.now(),
+            hasAudio: false,  // 音频通过流式播放，不需要关联
+          );
+          _messages.add(aiMessage);
+          _isProcessing = false;
+        });
+        _typingController.stop();
+        _scrollToBottom();
+      }
+    };
+
+    // 状态变化
+    _voiceService.onStateChanged = (String state) {
+      // ✅ 保留关键状态日志（低频）
+      _debugLog('🔄 [WebSocket] 状态变化: $state');
+
+      // 🔥 关键修复：模拟 py-xiaozhi 的 clear_audio_queue()
+      // 当用户开始新的录音（listening）时，清空上一轮的播放列表
+      // 这确保每次对话都从索引0开始，不会累积
+      if (state == 'listening' && _sessionState != 'listening') {
+        _debugLog('🗑️ 新对话开始，清空播放列表（模拟 py-xiaozhi clear_audio_queue）');
+        _streamingPlayer.stop();
+      }
+
+      setState(() {
+        _sessionState = state;
+      });
+    };
   }
 
   /// 统一的日志输出方法
@@ -150,11 +220,25 @@ class _ChatPageState extends State<ChatPage>
 
         print('✅ 语音会话初始化成功: ${result['session_id']}');
 
+        // 🚀 连接WebSocket接收实时音频推送
+        final wsConnected = await _voiceService.connectWebSocket();
+        if (wsConnected) {
+          // ✅ 连接成功后再设置回调，避免被清空
+          _setupWebSocketCallbacks();
+
+          setState(() {
+            _useStreamingPlayback = true;  // 启用流式播放
+          });
+          print('✅ WebSocket连接成功，启用流式音频播放');
+        } else {
+          print('⚠️ WebSocket连接失败，将使用轮询模式');
+        }
+
         // 加载欢迎消息
         _addWelcomeMessage();
 
-        // 启动状态轮询
-        _startStatusPolling();
+        // ❌ 删除旧逻辑: 不再启动状态轮询，完全依赖WebSocket推送
+        // _startStatusPolling();
       } else {
         setState(() {
           _isProcessing = false;
@@ -175,7 +259,8 @@ class _ChatPageState extends State<ChatPage>
     }
   }
 
-  /// 检查新消息（提取为独立方法，可以立即调用）
+  /// ❌ 删除旧逻辑: 不再轮询检查新消息，完全依赖WebSocket推送
+  /*
   Future<void> _checkForNewMessages() async {
     // ⚠️ 注意：AI消息现在通过逐句播放机制实时显示，不再从历史记录获取
     // 但需要从历史记录获取用户语音识别的文字
@@ -228,21 +313,20 @@ class _ChatPageState extends State<ChatPage>
       });
     }
   }
+  */
 
-  /// 启动状态轮询（监听AI响应）
+  /// ❌ 删除旧逻辑: 不再轮询状态
+  /*
   void _startStatusPolling() {
-    // 每0.3秒查询一次会话状态（优化响应速度）
-    // 从2秒减少到0.3秒，减少平均等待时间从1秒到150ms
     _statusPollingTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) async {
       if (!_isSessionInitialized) {
         timer.cancel();
         return;
       }
-
-      // 调用提取的检查新消息方法
       await _checkForNewMessages();
     });
   }
+  */
 
   void _addWelcomeMessage() {
     setState(() {
@@ -328,13 +412,8 @@ class _ChatPageState extends State<ChatPage>
         });
         _typingController.repeat();
 
-        // ✅ 启动逐句播放轮询（在这里启动，收到AI消息时不再重复启动）
-        print('🎵 启动逐句播放轮询...');
-        _startSentencePlayback();
-
-        // 立即检查一次新消息（不等轮询定时器）
-        // 这样可以更快地获取AI响应，减少延迟
-        _checkForNewMessages();
+        // ❌ 删除旧逻辑: 完全使用WebSocket流式播放，不再轮询
+        print('🚀 使用WebSocket流式播放，无需轮询');
       } else {
         _showSnackBar('停止录音失败: ${result['message']}');
       }
@@ -437,7 +516,8 @@ class _ChatPageState extends State<ChatPage>
     );
   }
 
-  /// 启动逐句播放(100ms轮询)
+  /// ❌ 删除旧逻辑: 不再使用逐句播放轮询
+  /*
   void _startSentencePlayback() {
     print('🎵 启动逐句播放轮询...');
 
@@ -445,8 +525,12 @@ class _ChatPageState extends State<ChatPage>
     _sentenceQueue.clear();
     _isPlayingSentences = false;  // ✅ 初始化为false,允许第一句开始播放
 
-    // 每300ms轮询新完成的句子（降低频率减少系统负担）
-    _sentencePollingTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) async {
+    // 每40ms轮询新完成的句子（降低延迟）
+    _sentencePollingTimer = Timer.periodic(const Duration(milliseconds: 40), (timer) async {
+      // 🔒 防止并发轮询
+      if (_isPolling) return;
+      _isPolling = true;
+
       try {
         final result = await _voiceService.getCompletedSentences(
           lastSentenceIndex: _lastSentenceIndex,
@@ -510,6 +594,8 @@ class _ChatPageState extends State<ChatPage>
         }
       } catch (e) {
         _debugLog('❌ 获取句子失败: $e');
+      } finally {
+        _isPolling = false;  // 🔓 释放锁
       }
     });
   }
@@ -559,28 +645,23 @@ class _ChatPageState extends State<ChatPage>
     });
   }
 
-  /// 停止逐句播放
-  void _stopSentencePlayback() {
-    _sentencePollingTimer?.cancel();
-    _sentencePollingTimer = null;
-    _playbackSubscription?.cancel();  // 取消播放完成监听
-    _playbackSubscription = null;
-    _isPlayingSentences = false;
-    _sentenceQueue.clear();
-    _lastSentenceIndex = 0;
-    print('🛑 逐句播放已停止');
-  }
+  */
 
   @override
   void dispose() {
-    _statusPollingTimer?.cancel();
-    _sentencePollingTimer?.cancel();  // 取消逐句播放轮询
-    _playbackSubscription?.cancel();  // 取消播放完成监听
+    // ❌ 删除旧逻辑: 不再使用轮询
+    // _statusPollingTimer?.cancel();
+    // _sentencePollingTimer?.cancel();
+    // _playbackSubscription?.cancel();
+
     _pulseController.dispose();
     _typingController.dispose();
     _textController.dispose();
     _scrollController.dispose();
-    _audioPlayerService.dispose();
+
+    // 🚀 清理WebSocket和流式播放器
+    _voiceService.disconnectWebSocket();
+    _streamingPlayer.dispose();
 
     // 关闭语音会话
     _voiceService.closeSession();

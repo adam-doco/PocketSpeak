@@ -1,15 +1,29 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:http/http.dart' as http;
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// 语音交互服务
 /// 封装与后端语音API的所有交互
 class VoiceService {
   static const String baseUrl = 'http://localhost:8000';
+  static const String wsUrl = 'ws://localhost:8000/api/voice/ws';
 
   // 会话状态
   bool _isSessionInitialized = false;
   String? _sessionId;
   String? _currentState;
+
+  // 🚀 WebSocket 连接（实时音频推送）
+  WebSocketChannel? _wsChannel;
+  StreamSubscription? _wsSubscription;
+  bool _isWsConnected = false;
+
+  // 🚀 音频帧回调（模仿py-xiaozhi的即时播放）
+  void Function(String audioData)? onAudioFrameReceived;
+  void Function(String text)? onUserTextReceived;  // 用户语音识别文字
+  void Function(String text)? onTextReceived;  // AI文本
+  void Function(String state)? onStateChanged;
 
   // 获取会话初始化状态
   bool get isSessionInitialized => _isSessionInitialized;
@@ -399,4 +413,125 @@ class VoiceService {
     _sessionId = null;
     _currentState = null;
   }
+
+  // ============== WebSocket 实时音频推送 ==============
+
+  /// 🚀 连接WebSocket（模仿py-xiaozhi的即时播放架构）
+  Future<bool> connectWebSocket() async {
+    // 🔥 先断开旧连接，防止hot reload导致重复连接
+    if (_isWsConnected) {
+      print('⚠️ 检测到旧连接，先断开...');
+      await disconnectWebSocket();
+    }
+
+    try {
+      print('🔌 正在连接WebSocket: $wsUrl');
+
+      _wsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
+
+      // 监听WebSocket消息
+      _wsSubscription = _wsChannel!.stream.listen(
+        (message) {
+          _handleWebSocketMessage(message);
+        },
+        onError: (error) {
+          print('❌ WebSocket错误: $error');
+          _isWsConnected = false;
+        },
+        onDone: () {
+          print('🔌 WebSocket连接已关闭');
+          _isWsConnected = false;
+        },
+      );
+
+      _isWsConnected = true;
+      print('✅ WebSocket连接成功');
+      return true;
+    } catch (e) {
+      print('❌ WebSocket连接失败: $e');
+      _isWsConnected = false;
+      return false;
+    }
+  }
+
+  /// 处理WebSocket消息
+  void _handleWebSocketMessage(dynamic message) {
+    try {
+      final data = jsonDecode(message);
+      final type = data['type'];
+
+      switch (type) {
+        case 'audio_frame':
+          // 🚀 收到音频帧，立即回调（模仿py-xiaozhi的write_audio）
+          if (onAudioFrameReceived != null) {
+            onAudioFrameReceived!(data['data']);
+          }
+          break;
+
+        case 'user_text':
+          // 🚀 收到用户语音识别文字
+          if (onUserTextReceived != null && data['data'] != null) {
+            onUserTextReceived!(data['data']);
+          }
+          break;
+
+        case 'text':
+          // 🚀 收到AI文本消息（新格式）
+          if (onTextReceived != null && data['data'] != null) {
+            onTextReceived!(data['data']);
+          }
+          break;
+
+        case 'ai_response':
+          // 兼容旧格式
+          if (onTextReceived != null && data['data']?['text'] != null) {
+            onTextReceived!(data['data']['text']);
+          }
+          break;
+
+        case 'state_change':
+          // 状态变化
+          if (onStateChanged != null && data['data']?['state'] != null) {
+            onStateChanged!(data['data']['state']);
+          }
+          break;
+
+        case 'error':
+          print('❌ 服务器错误: ${data['message']}');
+          break;
+
+        default:
+          print('⚠️ 未知消息类型: $type');
+      }
+    } catch (e) {
+      print('❌ 处理WebSocket消息失败: $e');
+    }
+  }
+
+  /// 断开WebSocket连接
+  Future<void> disconnectWebSocket() async {
+    if (!_isWsConnected && _wsChannel == null) {
+      return;
+    }
+
+    try {
+      // 清空回调，防止重复触发
+      onAudioFrameReceived = null;
+      onUserTextReceived = null;
+      onTextReceived = null;
+      onStateChanged = null;
+
+      await _wsSubscription?.cancel();
+      await _wsChannel?.sink.close();
+      _wsChannel = null;
+      _wsSubscription = null;
+      _isWsConnected = false;
+      print('✅ WebSocket已断开，回调已清空');
+    } catch (e) {
+      print('❌ 断开WebSocket失败: $e');
+    }
+  }
+
+  /// 获取WebSocket连接状态
+  bool get isWebSocketConnected => _isWsConnected;
 }

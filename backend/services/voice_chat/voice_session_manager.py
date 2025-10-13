@@ -22,6 +22,9 @@ from services.voice_chat.tts_player import TTSPlayer, PlaybackConfig, TTSRequest
 # 导入设备管理
 from services.device_lifecycle import PocketSpeakDeviceManager
 
+# ✅ 新增：导入音频缓冲管理器
+from services.voice_chat.audio_buffer_manager import create_sentence_buffer, AudioChunk
+
 logger = logging.getLogger(__name__)
 
 
@@ -358,6 +361,9 @@ class VoiceSessionManager:
         self.on_ai_speaking_end: Optional[Callable[[], None]] = None
         self.on_session_error: Optional[Callable[[str], None]] = None
         self.on_state_changed: Optional[Callable[[SessionState], None]] = None
+        # 🚀 新增：音频帧实时推送回调（模仿py-xiaozhi的即时播放）
+        self.on_text_received: Optional[Callable[[str], None]] = None  # 文本推送回调
+        self.on_audio_frame_received: Optional[Callable[[bytes], None]] = None
 
         # 统计信息
         self.stats = {
@@ -367,6 +373,14 @@ class VoiceSessionManager:
             "session_start_time": None,
             "session_uptime": 0.0
         }
+
+        # ✅ 新增：初始化音频缓冲队列（渐进式优化）
+        try:
+            self.sentence_buffer = create_sentence_buffer(preload_count=2)
+            logger.info("✅ 音频缓冲队列已初始化 (maxsize=500, threshold=0.5s)")
+        except Exception as e:
+            logger.warning(f"⚠️ 音频缓冲队列初始化失败（不影响功能）: {e}")
+            self.sentence_buffer = None
 
         logger.info("VoiceSessionManager 初始化完成")
 
@@ -833,16 +847,18 @@ class VoiceSessionManager:
 
                     return  # STT消息处理完毕，不继续后续逻辑
 
-                # 触发AI响应回调
-                if self.on_ai_response_received:
-                    self.on_ai_response_received(parsed_response)
+                # ❌ 删除: 不再通过on_ai_response_received推送文本，避免重复
+                # 文本通过_on_text_received → on_text_received推送
+                # 音频通过on_audio_frame_received直接推送
 
                 # 更新当前消息
                 if self.current_message:
-                    # ⚠️ 注意：文本内容通过 _on_text_received 回调处理，这里不再直接更新
-                    # 避免重复追加导致文本显示两遍
+                    # ⚠️ 注意：文本和音频都通过解析器回调处理
+                    # - 文本：_on_text_received → self.on_text_received(text)
+                    # - 音频：_on_audio_received → self.on_audio_frame_received(pcm_data)
+
                     if parsed_response.audio_data:
-                        # 使用append方法累积音频数据
+                        # 使用append方法累积音频数据（用于历史记录保存）
                         self.current_message.append_audio_chunk(parsed_response.audio_data)
 
                         # 🔥 关键：记录第一帧音频到达时间
@@ -851,9 +867,11 @@ class VoiceSessionManager:
                             if hasattr(self, '_stop_listening_time'):
                                 import time
                                 delay = (time.time() - self._stop_listening_time) * 1000
-                                logger.info(f"⏱️⏱️⏱️ 【关键延迟】从stop_listening到收到第一帧音频: {delay:.0f}ms")
+                                logger.info(f"⏱️ 【首帧延迟】{delay:.0f}ms")
 
-                        logger.info(f"📦 累积音频数据: +{parsed_response.audio_data.size} bytes, 总计: {self.current_message.ai_audio.size if self.current_message.ai_audio else 0} bytes")
+                        # ✅ 新增：同步到缓冲队列（异步，不阻塞）
+                        if self.sentence_buffer:
+                            asyncio.create_task(self._add_to_buffer_safe(parsed_response))
                     self.current_message.message_type = parsed_response.message_type
 
                     # 检查是否收到TTS stop信号(音频播放完成的官方标志)
@@ -908,8 +926,19 @@ class VoiceSessionManager:
                     self.on_user_speech_end(text)
             else:
                 # 已经有user_text,说明这是AI的回复文本
+
+                # 🚀 去重检查：避免重复处理相同的文本
+                if hasattr(self, '_last_ai_text') and self._last_ai_text == text:
+                    logger.debug(f"⚠️ DEBUG: 重复文本，跳过: {text}")
+                    return
+
+                self._last_ai_text = text
                 self.current_message.add_text_sentence(text)
                 logger.info(f"🤖 AI回复句子: {text}")
+
+                # 🚀 立即推送AI文本给前端 (模仿py-xiaozhi)
+                if self.on_text_received:
+                    self.on_text_received(text)
 
         # 注意：不再在这里保存历史记录
         # 历史记录的保存已移到收到TTS stop信号时（AI回复完成标志）
@@ -917,15 +946,39 @@ class VoiceSessionManager:
 
     def _on_audio_received(self, audio_data: AudioData):
         """
-        当收到音频消息时的回调
-        注意：TTS音频也会通过这个回调接收
-        音频数据会保存到对话历史，由前端播放
+        当收到音频消息时的回调（解析器触发）
+        🚀 在这里立即解码并推送音频帧给前端（模仿py-xiaozhi）
         """
-        logger.info(f"🔊 收到音频数据: {audio_data.size} bytes, format={audio_data.format}")
+        # 🚀 立即推送音频帧给前端（模仿py-xiaozhi的即时播放）
+        if self.on_audio_frame_received:
+            try:
+                # 解码OPUS为PCM（模仿py-xiaozhi的write_audio逻辑）
+                import opuslib
+                if not hasattr(self, '_streaming_opus_decoder'):
+                    # 初始化流式解码器（24kHz, 单声道）
+                    self._streaming_opus_decoder = opuslib.Decoder(24000, 1)
+                    logger.info("✅ 流式OPUS解码器已初始化")
+                    # 初始化帧计数器
+                    self._audio_frame_count = 0
 
-        # 后端不播放音频，音频由前端播放
-        # 音频数据已经在_on_ws_message_received中保存到current_message.ai_audio
-        logger.info("✅ 音频数据已保存到对话历史，等待前端获取")
+                # 解码OPUS为PCM（960帧 = 24000Hz * 0.04s）
+                pcm_data = self._streaming_opus_decoder.decode(
+                    audio_data.data,
+                    frame_size=960,
+                    decode_fec=False
+                )
+
+                # 调用回调推送给前端
+                self.on_audio_frame_received(pcm_data)
+
+                # 每10帧输出一次日志（避免日志过多）
+                self._audio_frame_count += 1
+                if self._audio_frame_count % 10 == 0:
+                    logger.info(f"🎵 已推送 {self._audio_frame_count} 帧音频")
+            except Exception as e:
+                logger.error(f"❌ 音频帧推送回调失败: {e}", exc_info=True)
+        else:
+            logger.warning("⚠️ on_audio_frame_received 回调未设置，音频帧未推送")
 
     def _on_mcp_received(self, mcp_data: Dict[str, Any]):
         """当收到MCP消息时的回调"""
@@ -991,6 +1044,31 @@ class VoiceSessionManager:
             self.conversation_history.pop(0)
 
         logger.debug(f"消息已保存到历史记录: {message.message_id}")
+
+    # ========== 音频缓冲队列同步 ==========
+
+    async def _add_to_buffer_safe(self, parsed_response):
+        """
+        安全地将音频数据添加到缓冲队列
+
+        注意：此方法失败不影响主流程
+        """
+        try:
+            chunk = AudioChunk(
+                chunk_id=f"chunk_{int(datetime.now().timestamp() * 1000)}",
+                audio_data=parsed_response.audio_data.data,
+                text=parsed_response.text_content or "",
+                format=parsed_response.audio_data.format,
+                sample_rate=parsed_response.audio_data.sample_rate,
+                channels=parsed_response.audio_data.channels
+            )
+
+            await self.sentence_buffer.audio_buffer.put(chunk)
+            logger.debug(f"✅ 音频已加入缓冲队列: {len(chunk.audio_data)} bytes")
+
+        except Exception as e:
+            # 失败仅记录日志，不抛出异常
+            logger.debug(f"添加到缓冲队列失败（不影响功能）: {e}")
 
 
 # ========== 全局单例实例管理 ==========

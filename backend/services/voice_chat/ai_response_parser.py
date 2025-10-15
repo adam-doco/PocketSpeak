@@ -72,6 +72,7 @@ class AIResponseParser:
         # 消息处理回调
         self.on_text_received: Optional[Callable[[str], None]] = None
         self.on_audio_received: Optional[Callable[[AudioData], None]] = None
+        self.on_emoji_received: Optional[Callable[[str, str], None]] = None  # 🎭 新增：emoji回调(emoji, emotion)
         self.on_response_parsed: Optional[Callable[[AIResponse], None]] = None
         self.on_error: Optional[Callable[[str], None]] = None
 
@@ -81,6 +82,7 @@ class AIResponseParser:
             "text_messages": 0,
             "audio_messages": 0,
             "mcp_messages": 0,
+            "emoji_messages": 0,  # 🎭 新增：emoji统计
             "error_messages": 0,
             "unknown_messages": 0
         }
@@ -127,6 +129,7 @@ class AIResponseParser:
 
             elif message_type == MessageType.EMOJI:
                 self._parse_emoji_message(message_dict, response)
+                self.stats["emoji_messages"] += 1  # 🎭 统计emoji消息
                 logger.info(f"😊 收到Emoji消息 (AI回复结束标志): {message_dict.get('text')} - {message_dict.get('emotion')}")
 
             elif message_type == MessageType.STT:
@@ -453,6 +456,14 @@ class AIResponseParser:
             # 音频数据回调
             if response.audio_data and self.on_audio_received:
                 self.on_audio_received(response.audio_data)
+
+            # 🎭 Emoji回调（新增）
+            if response.message_type == MessageType.EMOJI and self.on_emoji_received:
+                emoji = response.raw_message.get("emoji", "") if response.raw_message else ""
+                emotion = response.raw_message.get("emotion", "") if response.raw_message else ""
+                if emoji:
+                    self.on_emoji_received(emoji, emotion)
+                    logger.debug(f"🎭 触发emoji回调: {emoji} ({emotion})")
 
         except Exception as e:
             logger.error(f"触发回调失败: {e}")

@@ -1,0 +1,77 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "Z.moc3",
+		"Textures": [
+			"Z.4096/texture_00.png",
+			"Z.4096/texture_01.png"
+		],
+		"Physics": "Z.physics3.json",
+		"DisplayInfo": "Z.cdi3.json",
+		"Expressions": [
+			{
+				"Name": "A1爱心眼",
+				"File": "expressions/A1爱心眼.exp3.json"
+			},
+			{
+				"Name": "A2生气",
+				"File": "expressions/A2生气.exp3.json"
+			},
+			{
+				"Name": "A3星星眼",
+				"File": "expressions/A3星星眼.exp3.json"
+			},
+			{
+				"Name": "A4哭哭",
+				"File": "expressions/A4哭哭.exp3.json"
+			},
+			{
+				"Name": "B1麦克风",
+				"File": "expressions/B1麦克风.exp3.json"
+			},
+			{
+				"Name": "B2外套",
+				"File": "expressions/B2外套.exp3.json"
+			},
+			{
+				"Name": "舌头",
+				"File": "expressions/舌头.exp3.json"
+			}
+		],
+		"Motions": {
+			"": [
+				{
+					"File": "motions/Idle.motion3.json"
+				},
+				{
+					"File": "motions/jingya.motion3.json"
+				},
+				{
+					"File": "motions/kaixin.motion3.json"
+				},
+				{
+					"File": "motions/shengqi.motion3.json"
+				},
+				{
+					"File": "motions/wink.motion3.json"
+				},
+				{
+					"File": "motions/yaotou.motion3.json"
+				}
+			]
+		}
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": []
+		}
+	],
+	"HitAreas": []
+}

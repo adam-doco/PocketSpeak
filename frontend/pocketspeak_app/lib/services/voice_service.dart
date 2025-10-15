@@ -23,6 +23,7 @@ class VoiceService {
   void Function(String audioData)? onAudioFrameReceived;
   void Function(String text)? onUserTextReceived;  // 用户语音识别文字
   void Function(String text)? onTextReceived;  // AI文本
+  void Function(String emoji)? onEmotionReceived;  // AI表情emoji
   void Function(String state)? onStateChanged;
 
   // 获取会话初始化状态
@@ -56,7 +57,7 @@ class VoiceService {
           _sessionId = data['data']?['session_id'];
           _currentState = data['data']?['state'];
 
-          print('✅ 语音会话初始化成功: $_sessionId');
+          // ✅ 精简：移除初始化成功日志
           return {
             'success': true,
             'message': data['message'] ?? '语音会话初始化成功',
@@ -104,7 +105,7 @@ class VoiceService {
         _sessionId = null;
         _currentState = null;
 
-        print('✅ 语音会话已关闭');
+        // ✅ 精简：移除关闭会话日志
         return {
           'success': data['success'] ?? true,
           'message': data['message'] ?? '语音会话已关闭',
@@ -173,7 +174,7 @@ class VoiceService {
 
         if (data['success'] == true) {
           _currentState = data['data']?['state'];
-          print('🎤 开始录音');
+          // ✅ 精简：移除开始录音日志
         }
 
         return {
@@ -211,7 +212,7 @@ class VoiceService {
 
         if (data['success'] == true) {
           _currentState = data['data']?['state'];
-          print('⏹️ 停止录音');
+          // ✅ 精简：移除停止录音日志
         }
 
         return {
@@ -252,7 +253,7 @@ class VoiceService {
 
         if (data['success'] == true) {
           _currentState = data['data']?['state'];
-          print('💬 发送文本消息: $text');
+          // ✅ 精简：移除发送消息日志
         }
 
         return {
@@ -420,12 +421,12 @@ class VoiceService {
   Future<bool> connectWebSocket() async {
     // 🔥 先断开旧连接，防止hot reload导致重复连接
     if (_isWsConnected) {
-      print('⚠️ 检测到旧连接，先断开...');
+      // ✅ 精简：移除检测旧连接日志
       await disconnectWebSocket();
     }
 
     try {
-      print('🔌 正在连接WebSocket: $wsUrl');
+      // ✅ 精简：移除连接中日志
 
       _wsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
 
@@ -439,13 +440,13 @@ class VoiceService {
           _isWsConnected = false;
         },
         onDone: () {
-          print('🔌 WebSocket连接已关闭');
+          // ✅ 精简：移除连接关闭日志
           _isWsConnected = false;
         },
       );
 
       _isWsConnected = true;
-      print('✅ WebSocket连接成功');
+      // ✅ 精简：移除连接成功日志
       return true;
     } catch (e) {
       print('❌ WebSocket连接失败: $e');
@@ -459,6 +460,8 @@ class VoiceService {
     try {
       final data = jsonDecode(message);
       final type = data['type'];
+
+      // ✅ 精简：移除所有消息的debug日志（太多了）
 
       switch (type) {
         case 'audio_frame':
@@ -479,6 +482,22 @@ class VoiceService {
           // 🚀 收到AI文本消息（新格式）
           if (onTextReceived != null && data['data'] != null) {
             onTextReceived!(data['data']);
+          }
+          break;
+
+        case 'llm':
+          // 🎭 收到LLM消息（包含emoji表情）
+          // 示例: {"type":"llm", "text": "😊", "emotion": "smile"}
+          if (data['text'] != null) {
+            // 如果text就是emoji，触发emotion回调
+            if (onEmotionReceived != null) {
+              onEmotionReceived!(data['text']);
+            }
+          }
+          // 如果有独立的emotion字段也可以使用
+          if (data['emotion'] != null && onEmotionReceived != null) {
+            // emotion字段可能是英文描述，但我们主要使用text中的emoji
+            // ✅ 精简：移除emotion日志（已在chat_page中打印）
           }
           break;
 
@@ -519,6 +538,7 @@ class VoiceService {
       onAudioFrameReceived = null;
       onUserTextReceived = null;
       onTextReceived = null;
+      onEmotionReceived = null;
       onStateChanged = null;
 
       await _wsSubscription?.cancel();
@@ -526,7 +546,7 @@ class VoiceService {
       _wsChannel = null;
       _wsSubscription = null;
       _isWsConnected = false;
-      print('✅ WebSocket已断开，回调已清空');
+      // ✅ 精简：移除断开成功日志
     } catch (e) {
       print('❌ 断开WebSocket失败: $e');
     }

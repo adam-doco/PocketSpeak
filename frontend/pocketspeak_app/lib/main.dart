@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'pages/binding_page.dart';
 import 'pages/chat_page.dart';
+import 'pages/live2d_test_page.dart'; // Live2D测试页面
 import 'services/api_service.dart';
 
 void main() {
@@ -23,6 +24,10 @@ class PocketSpeakApp extends StatelessWidget {
         useMaterial3: true,
         fontFamily: 'SF Pro Display',
       ),
+      // 路由配置
+      routes: {
+        '/live2d_test': (context) => const Live2DTestPage(),
+      },
       // ✅ 修复：根据设备激活状态显示不同页面
       home: FutureBuilder<bool>(
         future: _checkActivationStatus(),
@@ -62,7 +67,7 @@ class PocketSpeakApp extends StatelessWidget {
           // ✅ 根据激活状态决定显示哪个页面
           final isActivated = snapshot.data ?? false;
           if (isActivated) {
-            print('✅ 设备已激活，进入聊天页面');
+            print('✅ 设备已激活，进入聊天页面（含Live2D模型）');
             return const ChatPage();
           } else {
             print('⚠️ 设备未激活，进入激活页面');

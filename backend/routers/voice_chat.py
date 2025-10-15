@@ -807,7 +807,7 @@ async def websocket_endpoint(websocket: WebSocket):
         # 🚀 设置回调函数推送消息到前端（完全模仿py-xiaozhi）
         def on_user_text_received(text: str):
             """收到用户语音识别文字立即推送"""
-            logger.info(f"📝 推送用户文字: {text}")
+            # ✅ 精简：移除高频日志
             asyncio.create_task(websocket.send_json({
                 "type": "user_text",
                 "data": text
@@ -815,17 +815,24 @@ async def websocket_endpoint(websocket: WebSocket):
 
         def on_text_received(text: str):
             """收到AI文本立即推送"""
-            # ✅ 保留关键文本日志（低频）
-            logger.info(f"📝 推送AI文本: {text}")
+            # ✅ 精简：移除高频日志
             asyncio.create_task(websocket.send_json({
                 "type": "text",
                 "data": text
             }))
 
+        def on_emoji_received(emoji: str, emotion: str):
+            """收到AI emoji立即推送（🎭 新增）"""
+            logger.info(f"🎭 推送emoji: {emoji}")
+            asyncio.create_task(websocket.send_json({
+                "type": "llm",
+                "text": emoji,
+                "emotion": emotion
+            }))
+
         def on_state_change(state):
             """状态变化推送"""
-            # ✅ 保留关键状态日志（低频）
-            logger.debug(f"🔄 状态变化: {state.value}")
+            # ✅ 精简：移除高频状态日志
             asyncio.create_task(websocket.send_json({
                 "type": "state_change",
                 "data": {"state": state.value}
@@ -844,7 +851,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "audio_frame",
                             "data": base64.b64encode(audio_data).decode('utf-8')
                         })
-                        logger.debug(f"✅ 音频帧已推送: {len(audio_data)} bytes")
+                        # ✅ 精简：移除高频音频帧日志
                     except Exception as e:
                         logger.error(f"❌ WebSocket发送音频帧失败: {e}")
 
@@ -855,6 +862,7 @@ async def websocket_endpoint(websocket: WebSocket):
         # 🚀 注册回调（纯WebSocket推送，无轮询）
         session.on_user_speech_end = on_user_text_received  # 用户文字推送
         session.on_text_received = on_text_received  # AI文本推送
+        session.on_emoji_received = on_emoji_received  # 🎭 emoji推送（新增）
         session.on_state_changed = on_state_change  # 状态推送
         session.on_audio_frame_received = on_audio_frame  # 音频帧推送
 

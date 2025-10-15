@@ -364,6 +364,7 @@ class VoiceSessionManager:
         # 🚀 新增：音频帧实时推送回调（模仿py-xiaozhi的即时播放）
         self.on_text_received: Optional[Callable[[str], None]] = None  # 文本推送回调
         self.on_audio_frame_received: Optional[Callable[[bytes], None]] = None
+        self.on_emoji_received: Optional[Callable[[str, str], None]] = None  # 🎭 新增：emoji推送回调(emoji, emotion)
 
         # 统计信息
         self.stats = {
@@ -509,6 +510,7 @@ class VoiceSessionManager:
         # 解析器回调
         self.parser.on_text_received = self._on_text_received
         self.parser.on_audio_received = self._on_audio_received
+        self.parser.on_emoji_received = self._on_emoji_received  # 🎭 新增：emoji回调
         self.parser.on_mcp_received = self._on_mcp_received
         self.parser.on_tts_received = self._on_tts_received
         self.parser.on_error_received = self._on_parse_error
@@ -979,6 +981,18 @@ class VoiceSessionManager:
                 logger.error(f"❌ 音频帧推送回调失败: {e}", exc_info=True)
         else:
             logger.warning("⚠️ on_audio_frame_received 回调未设置，音频帧未推送")
+
+    def _on_emoji_received(self, emoji: str, emotion: str):
+        """
+        当收到Emoji消息时的回调（AI回复结束标志）
+        🎭 立即推送给前端用于播放Live2D表情
+        """
+        logger.info(f"🎭 收到Emoji: {emoji} ({emotion})")
+
+        # 🚀 立即推送emoji给前端（模仿py-xiaozhi）
+        if self.on_emoji_received:
+            self.on_emoji_received(emoji, emotion)
+            logger.debug(f"🎭 Emoji已推送给前端: {emoji}")
 
     def _on_mcp_received(self, mcp_data: Dict[str, Any]):
         """当收到MCP消息时的回调"""

@@ -36,14 +36,16 @@ class SeamlessAudioPlayer {
   /// 初始化播放器
   Future<void> _initPlayer() async {
     try {
+      // 🔇 关闭FlutterSound的debug日志（临时注释，待确认API）
+      // _player.setLogLevel(LogLevel.error);
       await _player.openPlayer();
       _isInitialized = true;
-      print('✅ Flutter Sound 播放器已初始化');
+      // ✅ 精简：只在失败时输出日志
 
       // ⚠️ 不在初始化时启动播放，而是等待第一帧到达时再启动
       // 原因：无数据时立即启动会触发"播放完成"事件，可能导致状态错误
     } catch (e) {
-      print('❌ 初始化 Flutter Sound 失败: $e');
+      print('❌ 初始化播放器失败: $e');
     }
   }
 
@@ -54,7 +56,7 @@ class SeamlessAudioPlayer {
     _isStarting = true;
 
     try {
-      print('🎵 启动 PCM 流式播放 (24kHz, 单声道, PCM16)');
+      // ✅ 精简：移除日志
 
       await _player.startPlayerFromStream(
         codec: codec,
@@ -65,11 +67,11 @@ class SeamlessAudioPlayer {
       );
 
       _isPlaying = true;
-      print('✅ PCM 流式播放已启动');
+      // ✅ 精简：移除启动日志
 
       // 🔥 启动完成后，立即feed所有待处理的帧
       if (_pendingFrames.isNotEmpty) {
-        print('🔄 Feed启动期间缓冲的 ${_pendingFrames.length} 帧');
+        // ✅ 精简：移除缓冲日志
         for (var frame in _pendingFrames) {
           _feedFrame(frame);
         }
@@ -145,13 +147,13 @@ class SeamlessAudioPlayer {
         // 停止流式播放
         await _player.stopPlayer();
         _isPlaying = false;
-        print('⏹️ PCM 流式播放已停止');
+        // ✅ 精简：移除停止日志
       }
 
       // 清空待处理的帧
       if (_pendingFrames.isNotEmpty) {
         _pendingFrames.clear();
-        print('🗑️ 已清空 pending frames');
+        // ✅ 精简：移除清空日志
       }
     } catch (e) {
       print('❌ 停止播放失败: $e');
@@ -165,7 +167,7 @@ class SeamlessAudioPlayer {
     if (_isInitialized) {
       await _player.closePlayer();
       _isInitialized = false;
-      print('🗑️ Flutter Sound 播放器已释放');
+      // ✅ 精简：移除释放日志
     }
   }
 

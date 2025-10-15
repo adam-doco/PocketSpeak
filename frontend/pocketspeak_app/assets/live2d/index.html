@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <base href="./">
+    <title>Live2D Model</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: transparent;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #666;
+            font-size: 14px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            text-align: center;
+        }
+
+        .error {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff6b6b;
+            font-size: 14px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            text-align: center;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading" class="loading">正在加载Live2D模型...</div>
+    <div id="error" class="error">模型加载失败<br/>请检查控制台</div>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        // 全局日志函数 - 发送日志到Flutter
+        function log(message, level = 'info') {
+            console.log(`[Live2D ${level.toUpperCase()}]`, message);
+
+            // 发送到Flutter (flutter_inappwebview API)
+            if (window.flutter_inappwebview) {
+                window.flutter_inappwebview.callHandler('FlutterChannel', JSON.stringify({
+                    type: 'log',
+                    level: level,
+                    message: message
+                }));
+            }
+        }
+
+        // Live2D控制器类
+        class Live2DController {
+            constructor() {
+                this.app = null;
+                this.model = null;
+                this.isLoaded = false;
+                this.canvas = document.getElementById('canvas');
+                this.loadingElement = document.getElementById('loading');
+                this.errorElement = document.getElementById('error');
+            }
+
+            async init() {
+                try {
+                    log('开始初始化Live2D...');
+
+                    // 加载依赖脚本
+                    await this.loadScripts();
+
+                    // 初始化PIXI应用
+                    await this.initPixiApp();
+
+                    // 加载Live2D模型
+                    await this.loadModel();
+
+                    // 隐藏加载提示
+                    this.hideLoading();
+
+                    this.isLoaded = true;
+                    log('Live2D初始化完成', 'success');
+
+                    // 通知Flutter初始化完成
+                    this.sendToFlutter({
+                        type: 'initialized',
+                        status: 'success'
+                    });
+
+                } catch (error) {
+                    log(`Live2D初始化失败: ${error.message}`, 'error');
+                    console.error('详细错误:', error);
+                    this.showError(error.message);
+
+                    // 通知Flutter初始化失败
+                    this.sendToFlutter({
+                        type: 'initialized',
+                        status: 'error',
+                        message: error.message
+                    });
+                }
+            }
+
+            async loadScripts() {
+                log('开始加载依赖脚本...');
+
+                const scripts = [
+                    'https://unpkg.com/pixi.js@7.3.2/dist/pixi.min.js',
+                    'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js'
+                ];
+
+                for (const src of scripts) {
+                    await this.loadScript(src);
+                }
+
+                // 设置PIXI全局变量
+                window.PIXI = PIXI;
+
+                // 加载 pixi-live2d-display
+                await this.loadScript('https://unpkg.com/pixi-live2d-display@0.4.0/dist/cubism4.min.js');
+
+                log('所有脚本加载完成', 'success');
+            }
+
+            loadScript(src) {
+                return new Promise((resolve, reject) => {
+                    log(`加载脚本: ${src}`);
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.onload = () => {
+                        log(`脚本加载成功: ${src}`, 'success');
+                        resolve();
+                    };
+                    script.onerror = () => {
+                        const error = `脚本加载失败: ${src}`;
+                        log(error, 'error');
+                        reject(new Error(error));
+                    };
+                    document.head.appendChild(script);
+                });
+            }
+
+            async initPixiApp() {
+                log('初始化PIXI应用...');
+
+                this.app = new PIXI.Application({
+                    view: this.canvas,
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                    backgroundColor: 0x000000,
+                    backgroundAlpha: 0,
+                    antialias: true,
+                    resolution: window.devicePixelRatio || 1,
+                    autoDensity: true
+                });
+
+                log('PIXI应用初始化完成', 'success');
+
+                // 监听窗口大小变化
+                window.addEventListener('resize', () => {
+                    this.app.renderer.resize(window.innerWidth, window.innerHeight);
+                    if (this.model) {
+                        this.positionModel();
+                    }
+                });
+            }
+
+            async loadModel() {
+                try {
+                    log('开始加载Live2D模型...');
+
+                    // 构建基于当前页面的绝对路径
+                    const currentUrl = window.location.href;
+                    log(`当前页面URL: ${currentUrl}`);
+
+                    // 提取基础路径：从URL中移除 'index.html'
+                    const baseUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
+                    log(`基础路径: ${baseUrl}`);
+
+                    const modelPath = baseUrl + 'models/Mould/Z.model3.json';
+                    log(`完整模型路径: ${modelPath}`);
+
+                    // 测试文件是否可访问
+                    try {
+                        const testResponse = await fetch(modelPath, { method: 'HEAD' });
+                        log(`文件访问测试: ${testResponse.ok ? '成功' : '失败 ' + testResponse.status}`);
+                    } catch (e) {
+                        log(`文件访问测试失败: ${e.message}`, 'error');
+                    }
+
+                    // 尝试加载模型
+                    log(`开始加载模型...`);
+                    this.model = await PIXI.live2d.Live2DModel.from(modelPath);
+                    log(`模型加载成功`, 'success');
+
+                    this.app.stage.addChild(this.model);
+                    log('模型添加到舞台', 'success');
+
+                    // 设置模型位置
+                    this.positionModel();
+
+                    // 播放默认待机动作
+                    await this.playMotion('', 0);
+
+                    log('Live2D模型加载完成', 'success');
+
+                } catch (error) {
+                    log(`模型加载失败: ${error.message}`, 'error');
+                    log(`错误堆栈: ${error.stack}`, 'error');
+                    console.error('详细错误:', error);
+                    throw error;
+                }
+            }
+
+            positionModel() {
+                if (!this.model) return;
+
+                // 等待模型完全加载，最多重试5次
+                if (!this.positionRetryCount) this.positionRetryCount = 0;
+
+                if ((!this.model.width || !this.model.height ||
+                     this.model.width < 10 || this.model.height < 10) &&
+                    this.positionRetryCount < 5) {
+                    log(`模型尺寸未就绪，延迟定位 (第${this.positionRetryCount + 1}次)`);
+                    this.positionRetryCount++;
+                    setTimeout(() => this.positionModel(), 200);
+                    return;
+                }
+
+                // 设置锚点为中心
+                this.model.anchor.set(0.5, 0.5);
+
+                // 居中显示（向上偏移20px，避免被底部输入框遮挡）
+                this.model.x = window.innerWidth / 2;
+                this.model.y = window.innerHeight / 2 - 20;
+
+                // 计算缩放比例
+                if (this.model.width && this.model.height) {
+                    const scale = Math.min(
+                        window.innerWidth / this.model.width,
+                        window.innerHeight / this.model.height
+                    ) * 0.9;
+
+                    const finalScale = Math.max(0.1, Math.min(2.0, scale));
+                    this.model.scale.set(finalScale);
+
+                    log(`模型定位完成: 位置(${this.model.x}, ${this.model.y}), 缩放${finalScale}`, 'success');
+                } else {
+                    // 使用默认缩放
+                    this.model.scale.set(0.5);
+                    log('使用默认缩放 0.5');
+                }
+
+                this.positionRetryCount = 0;
+            }
+
+            // 播放动作
+            async playMotion(group = '', index = 0) {
+                if (!this.model || !this.isLoaded) {
+                    log('模型未加载，无法播放动作', 'warn');
+                    return;
+                }
+
+                try {
+                    log(`播放动作: group="${group}", index=${index}`);
+                    await this.model.motion(group, index);
+                    log(`动作播放成功`, 'success');
+                } catch (error) {
+                    log(`动作播放失败: ${error.message}`, 'error');
+                    console.error(error);
+                }
+            }
+
+            // 播放表情
+            async playExpression(name) {
+                if (!this.model || !this.isLoaded) {
+                    log('模型未加载，无法播放表情', 'warn');
+                    return;
+                }
+
+                try {
+                    log(`播放表情: ${name}`);
+
+                    // 检查模型是否有表情定义
+                    if (!this.model.internalModel || !this.model.internalModel.motionManager) {
+                        log('模型没有表情管理器', 'warn');
+                        return;
+                    }
+
+                    // 获取可用的表情列表
+                    const expressions = this.model.internalModel.settings?.expressions;
+                    if (expressions) {
+                        log(`模型可用表情: ${expressions.map(e => e.Name || e.name).join(', ')}`);
+                    }
+
+                    // 播放表情
+                    const result = await this.model.expression(name);
+                    log(`表情播放成功，返回值: ${result}`, 'success');
+                } catch (error) {
+                    log(`表情播放失败: ${error.message}`, 'error');
+                    console.error('表情播放详细错误:', error);
+                }
+            }
+
+            hideLoading() {
+                if (this.loadingElement) {
+                    this.loadingElement.style.display = 'none';
+                }
+            }
+
+            showError(message) {
+                if (this.loadingElement) {
+                    this.loadingElement.style.display = 'none';
+                }
+                if (this.errorElement) {
+                    this.errorElement.textContent = `模型加载失败\n${message}`;
+                    this.errorElement.style.display = 'block';
+                }
+            }
+
+            sendToFlutter(data) {
+                if (window.flutter_inappwebview) {
+                    window.flutter_inappwebview.callHandler('FlutterChannel', JSON.stringify(data));
+                }
+            }
+        }
+
+        // 创建全局控制器实例
+        let controller = null;
+
+        // 页面加载完成后初始化
+        window.addEventListener('DOMContentLoaded', async () => {
+            log('DOM加载完成，开始初始化Live2D控制器');
+
+            try {
+                controller = new Live2DController();
+                await controller.init();
+
+                // 暴露全局接口供Flutter调用
+                window.live2dController = controller;
+
+                // 暴露快捷方法
+                window.playMotion = (group, index) => controller.playMotion(group, index);
+                window.playExpression = (name) => controller.playExpression(name);
+
+                log('Live2D控制器已就绪', 'success');
+
+            } catch (error) {
+                log(`控制器初始化失败: ${error.message}`, 'error');
+                console.error(error);
+            }
+        });
+    </script>
+</body>
+</html>

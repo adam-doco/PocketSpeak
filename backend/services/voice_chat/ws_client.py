@@ -36,12 +36,13 @@ class ConnectionState(Enum):
 class WSConfig:
     """WebSocket连接配置"""
     url: str = "wss://api.tenclass.net/xiaozhi/v1/"
-    ping_interval: int = 30  # 心跳间隔（秒）
-    ping_timeout: int = 10   # 心跳超时（秒）
+    ping_interval: int = 20  # 心跳间隔（秒）- 对齐py-xiaozhi的生产验证值
+    ping_timeout: int = 20   # 心跳超时（秒）- 对齐py-xiaozhi的生产验证值
     max_reconnect_attempts: int = 10
     reconnect_base_delay: float = 1.0  # 基础重连延迟
     reconnect_max_delay: float = 60.0  # 最大重连延迟
     connection_timeout: int = 30
+    monitor_interval: int = 5  # 连接监控间隔（秒）- 参照py-xiaozhi
 
 
 @dataclass
@@ -81,11 +82,15 @@ class XiaozhiWebSocketClient:
         self.state = ConnectionState.DISCONNECTED
         self.websocket: Optional[websockets.WebSocketServerProtocol] = None
         self.connection_task: Optional[asyncio.Task] = None
-        self.heartbeat_task: Optional[asyncio.Task] = None
+        self.heartbeat_task: Optional[asyncio.Task] = None  # 已弃用，保留兼容性
+        self.monitor_task: Optional[asyncio.Task] = None  # 连接监控任务（参照py-xiaozhi）
 
         # 重连控制
         self.reconnect_attempts = 0
         self.should_reconnect = True
+        self._is_closing = False  # 是否正在主动关闭（参照py-xiaozhi）
+        self._auto_reconnect_enabled = False  # 自动重连开关（参照py-xiaozhi）
+        self._max_reconnect_attempts = 0  # 最大重连次数（参照py-xiaozhi）
 
         # 设备信息缓存
         self.device_info: Optional[DeviceInfo] = None
@@ -184,14 +189,20 @@ class XiaozhiWebSocketClient:
             self.stats["uptime_start"] = time.time()
             self.reconnect_attempts = 0
 
-            logger.info("✅ WebSocket连接建立成功")
+            logger.info(f"✅ WebSocket连接建立成功 (ping_interval={self.config.ping_interval}s, ping_timeout={self.config.ping_timeout}s)")
 
             if self.on_connected:
                 self.on_connected()
 
-            # 启动消息处理和心跳任务
+            # 启动消息处理任务
             self.connection_task = asyncio.create_task(self._handle_messages())
-            self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            # 🔥 禁用自定义应用层心跳任务，使用websockets库内置的ping/pong机制（参照py-xiaozhi）
+            # self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            logger.info("💓 使用websockets库内置心跳机制（无需应用层心跳任务）")
+
+            # 🔥 启动连接监控任务（每5秒检查连接状态，参照py-xiaozhi）
+            self.monitor_task = asyncio.create_task(self._connection_monitor())
+            logger.info(f"🔍 连接监控任务已启动 (检查间隔={self.config.monitor_interval}s)")
 
             # 发送认证消息
             await self._authenticate()
@@ -212,11 +223,28 @@ class XiaozhiWebSocketClient:
 
             return False
 
+    def enable_auto_reconnect(self, enabled: bool = True, max_attempts: int = 5):
+        """
+        启用或禁用自动重连功能（参照py-xiaozhi）
+
+        Args:
+            enabled: 是否启用自动重连
+            max_attempts: 最大重连次数（仅当enabled=True时有效）
+        """
+        self._auto_reconnect_enabled = enabled
+        if enabled:
+            self._max_reconnect_attempts = max_attempts
+            logger.info(f"✅ 启用自动重连，最大尝试次数: {max_attempts}")
+        else:
+            self._max_reconnect_attempts = 0
+            logger.info("❌ 禁用自动重连")
+
     async def disconnect(self):
         """断开WebSocket连接"""
         logger.info("开始断开WebSocket连接")
 
         self.should_reconnect = False
+        self._is_closing = True  # 标记为主动关闭（参照py-xiaozhi）
         self.state = ConnectionState.DISCONNECTED
 
         # 取消任务
@@ -231,6 +259,13 @@ class XiaozhiWebSocketClient:
             self.heartbeat_task.cancel()
             try:
                 await self.heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
+        if self.monitor_task:
+            self.monitor_task.cancel()
+            try:
+                await self.monitor_task
             except asyncio.CancelledError:
                 pass
 
@@ -529,24 +564,40 @@ class XiaozhiWebSocketClient:
                 except Exception as e:
                     logger.error(f"处理消息失败: {e}", exc_info=True)
 
-        except websockets.exceptions.ConnectionClosed:
-            logger.warning("WebSocket连接已关闭")
-            self.state = ConnectionState.DISCONNECTED
+        except websockets.exceptions.ConnectionClosed as e:
+            # WebSocket正常关闭（参照py-xiaozhi）
+            close_code = getattr(e, 'code', 'unknown')
+            close_reason = getattr(e, 'reason', 'unknown')
+            logger.warning(f"WebSocket连接已关闭 (code={close_code}, reason={close_reason})")
+            await self._handle_connection_loss(f"连接关闭: {close_code} {close_reason}")
 
-            if self.on_disconnected:
-                self.on_disconnected("连接关闭")
+        except websockets.exceptions.ConnectionClosedError as e:
+            # WebSocket异常关闭（参照py-xiaozhi）
+            close_code = getattr(e, 'code', 'unknown')
+            close_reason = getattr(e, 'reason', 'unknown')
+            logger.error(f"WebSocket连接错误: code={close_code}, reason={close_reason}")
+            await self._handle_connection_loss(f"连接错误: {close_code} {close_reason}")
 
-            # 自动重连
-            if self.should_reconnect:
-                await self._schedule_reconnect()
+        except websockets.exceptions.InvalidState as e:
+            # WebSocket状态异常（参照py-xiaozhi）
+            logger.error(f"WebSocket状态异常: {e}")
+            await self._handle_connection_loss("连接状态异常")
+
+        except ConnectionResetError:
+            # 连接被重置（参照py-xiaozhi）
+            logger.error("连接被重置 (ConnectionResetError)")
+            await self._handle_connection_loss("连接被重置")
+
+        except OSError as e:
+            # 网络I/O错误（参照py-xiaozhi）
+            logger.error(f"网络I/O错误: {e}")
+            await self._handle_connection_loss(f"网络I/O错误: {e}")
 
         except Exception as e:
+            # 其他未预期的异常
             error_msg = f"消息处理循环异常: {e}"
-            logger.error(error_msg)
-            self.state = ConnectionState.ERROR
-
-            if self.on_error:
-                self.on_error(error_msg)
+            logger.error(error_msg, exc_info=True)
+            await self._handle_connection_loss(f"未知异常: {e}")
 
     async def _process_message(self, data: Dict[str, Any]):
         """处理特定类型的消息"""
@@ -596,7 +647,12 @@ class XiaozhiWebSocketClient:
                 self.on_error(f"服务器错误: {error_msg}")
 
     async def _heartbeat_loop(self):
-        """心跳循环"""
+        """
+        心跳循环（已弃用）
+
+        注意：此方法已被websockets库的内置ping/pong机制取代
+        保留此方法仅为兼容性，实际不再使用
+        """
         try:
             while self.state in [ConnectionState.CONNECTED, ConnectionState.AUTHENTICATED]:
                 await asyncio.sleep(self.config.ping_interval)
@@ -620,6 +676,135 @@ class XiaozhiWebSocketClient:
 
         except asyncio.CancelledError:
             logger.debug("心跳任务已取消")
+
+    async def _connection_monitor(self):
+        """
+        连接监控任务（完全参照py-xiaozhi实现）
+
+        每5秒检查一次WebSocket连接状态：
+        1. 检查websocket对象是否存在
+        2. 使用close_code检查连接是否真正关闭（不是closed属性！）
+        3. 如果发现异常，触发连接丢失处理
+
+        关键差异：
+        - closed属性：只检查是否调用了close()方法
+        - close_code属性：检查连接是否真正被关闭（包括服务器断开和网络异常）
+
+        这是主动监控机制，配合websockets库的被动ping/pong形成双重保障
+        """
+        try:
+            while self.websocket and not self.should_reconnect == False:
+                await asyncio.sleep(self.config.monitor_interval)
+
+                # 🔥 关键修复：使用close_code而不是closed（参照py-xiaozhi第219行）
+                if self.websocket:
+                    if self.websocket.close_code is not None:
+                        logger.warning(f"🔍 连接监控：检测到WebSocket连接已关闭 (close_code={self.websocket.close_code})")
+                        # 触发连接丢失处理
+                        await self._handle_connection_loss("连接监控检测到连接已关闭")
+                        break
+                    else:
+                        # 连接正常，记录调试信息
+                        logger.debug(f"🔍 连接监控：连接正常 (close_code=None, state={self.state.value})")
+
+        except asyncio.CancelledError:
+            logger.debug("连接监控任务已取消")
+        except Exception as e:
+            logger.error(f"连接监控任务异常: {e}", exc_info=True)
+
+    async def _cleanup_connection(self):
+        """
+        清理连接资源（参照py-xiaozhi实现）
+
+        在重连之前必须彻底清理旧的连接和任务，避免资源泄漏
+        """
+        logger.debug("🧹 开始清理连接资源")
+
+        # 取消所有后台任务
+        tasks_to_cancel = []
+        if self.connection_task and not self.connection_task.done():
+            tasks_to_cancel.append(("connection_task", self.connection_task))
+        if self.heartbeat_task and not self.heartbeat_task.done():
+            tasks_to_cancel.append(("heartbeat_task", self.heartbeat_task))
+        if self.monitor_task and not self.monitor_task.done():
+            tasks_to_cancel.append(("monitor_task", self.monitor_task))
+
+        # 取消任务
+        for task_name, task in tasks_to_cancel:
+            try:
+                task.cancel()
+                await asyncio.wait_for(task, timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                logger.debug(f"✅ 已取消 {task_name}")
+            except Exception as e:
+                logger.warning(f"取消 {task_name} 失败: {e}")
+
+        # 关闭WebSocket连接
+        if self.websocket:
+            try:
+                await asyncio.wait_for(self.websocket.close(), timeout=2.0)
+                logger.debug("✅ WebSocket连接已关闭")
+            except asyncio.TimeoutError:
+                logger.warning("WebSocket关闭超时")
+            except Exception as e:
+                logger.warning(f"关闭WebSocket失败: {e}")
+            finally:
+                self.websocket = None
+
+        # 重置任务引用
+        self.connection_task = None
+        self.heartbeat_task = None
+        self.monitor_task = None
+
+        logger.debug("✅ 连接资源清理完成")
+
+    async def _handle_connection_loss(self, reason: str):
+        """
+        处理连接丢失（参照py-xiaozhi实现）
+
+        这个方法会：
+        1. 检查是否正在主动关闭（避免不必要的重连）
+        2. 清理连接资源
+        3. 更新连接状态
+        4. 触发断开回调
+        5. 如果启用自动重连，触发重连
+        """
+        logger.warning(f"🔗 处理连接丢失: {reason}")
+
+        # 🔥 检查是否正在主动关闭（参照py-xiaozhi）
+        if self._is_closing:
+            logger.info("正在主动关闭连接，跳过重连逻辑")
+            return
+
+        # 🔥 清理连接资源（参照py-xiaozhi）
+        await self._cleanup_connection()
+
+        # 更新连接状态
+        was_connected = self.state in [ConnectionState.CONNECTED, ConnectionState.AUTHENTICATED]
+        self.state = ConnectionState.DISCONNECTED
+
+        # 通知连接状态变化
+        if self.on_disconnected and was_connected:
+            try:
+                self.on_disconnected(reason)
+            except Exception as e:
+                logger.error(f"调用连接断开回调失败: {e}")
+
+        # 🔥 检查自动重连开关（参照py-xiaozhi）
+        if self._auto_reconnect_enabled and self.should_reconnect:
+            # 检查重连次数限制
+            if self._max_reconnect_attempts > 0 and self.reconnect_attempts >= self._max_reconnect_attempts:
+                logger.error(f"已达到最大重连次数 ({self._max_reconnect_attempts})，停止重连")
+                if self.on_error:
+                    self.on_error(f"连接丢失且已达最大重连次数: {reason}")
+            else:
+                # 触发重连
+                await self._schedule_reconnect()
+        else:
+            # 未启用自动重连或should_reconnect为False
+            logger.info("自动重连未启用或已禁止重连")
+            if self.on_error:
+                self.on_error(f"连接丢失: {reason}")
 
     async def _schedule_reconnect(self):
         """调度重连（指数退避）"""

@@ -459,6 +459,10 @@ class VoiceSessionManager:
             # 6. 设置回调函数
             self._setup_callbacks()
 
+            # 6.5 启用WebSocket自动重连（参照py-xiaozhi）
+            self.ws_client.enable_auto_reconnect(enabled=True, max_attempts=5)
+            logger.info("✅ WebSocket自动重连已启用 (max_attempts=5)")
+
             # 7. 建立WebSocket连接
             logger.info("建立WebSocket连接...")
             if not await self.ws_client.connect():
@@ -504,6 +508,7 @@ class VoiceSessionManager:
 
         # WebSocket客户端回调
         self.ws_client.on_message_received = self._on_ws_message_received
+        self.ws_client.on_authenticated = self._on_ws_authenticated  # 🔥 新增：重连成功回调
         self.ws_client.on_disconnected = self._on_ws_disconnected
         self.ws_client.on_error = self._on_ws_error
 
@@ -899,6 +904,19 @@ class VoiceSessionManager:
 
         except Exception as e:
             logger.error(f"处理WebSocket消息失败: {e}", exc_info=True)
+
+    def _on_ws_authenticated(self):
+        """
+        当WebSocket认证成功时的回调（包括重连后的认证）
+        🔥 关键：重连成功后将状态从error恢复为ready
+        """
+        logger.info("✅ WebSocket认证成功")
+
+        # 如果当前状态是error（断线导致的），恢复为ready状态
+        if self.state == SessionState.ERROR:
+            logger.info("🔄 WebSocket重连成功，恢复会话状态为ready")
+            self._update_state(SessionState.READY)
+        # 如果是初次认证（initializing状态），保持不变（在initialize()中会设置为ready）
 
     def _on_ws_disconnected(self, reason: str):
         """当WebSocket断开连接时的回调"""

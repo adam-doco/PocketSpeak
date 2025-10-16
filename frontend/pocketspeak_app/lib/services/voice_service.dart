@@ -19,6 +19,12 @@ class VoiceService {
   StreamSubscription? _wsSubscription;
   bool _isWsConnected = false;
 
+  // 🔥 自动重连控制（参照py-xiaozhi）
+  bool _autoReconnect = false;  // 自动重连开关
+  int _reconnectAttempts = 0;   // 重连尝试次数
+  final int _maxReconnectAttempts = 5;  // 最大重连次数
+  Timer? _reconnectTimer;       // 重连定时器
+
   // 🚀 音频帧回调（模仿py-xiaozhi的即时播放）
   void Function(String audioData)? onAudioFrameReceived;
   void Function(String text)? onUserTextReceived;  // 用户语音识别文字
@@ -418,15 +424,18 @@ class VoiceService {
   // ============== WebSocket 实时音频推送 ==============
 
   /// 🚀 连接WebSocket（模仿py-xiaozhi的即时播放架构）
-  Future<bool> connectWebSocket() async {
+  Future<bool> connectWebSocket({bool enableAutoReconnect = true}) async {
+    // 🔥 先取消重连定时器
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+
     // 🔥 先断开旧连接，防止hot reload导致重复连接
     if (_isWsConnected) {
-      // ✅ 精简：移除检测旧连接日志
       await disconnectWebSocket();
     }
 
     try {
-      // ✅ 精简：移除连接中日志
+      print('🔌 正在连接WebSocket: $wsUrl');
 
       _wsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
 
@@ -438,21 +447,65 @@ class VoiceService {
         onError: (error) {
           print('❌ WebSocket错误: $error');
           _isWsConnected = false;
+          // 🔥 触发自动重连
+          if (_autoReconnect) {
+            _scheduleReconnect();
+          }
         },
         onDone: () {
-          // ✅ 精简：移除连接关闭日志
+          print('🔌 WebSocket连接已关闭');
           _isWsConnected = false;
+          // 🔥 触发自动重连
+          if (_autoReconnect) {
+            _scheduleReconnect();
+          }
         },
       );
 
       _isWsConnected = true;
-      // ✅ 精简：移除连接成功日志
+      _autoReconnect = enableAutoReconnect;  // 🔥 设置自动重连开关
+      _reconnectAttempts = 0;  // 🔥 重置重连次数
+      print('✅ WebSocket连接成功');
       return true;
     } catch (e) {
       print('❌ WebSocket连接失败: $e');
       _isWsConnected = false;
+      // 🔥 触发自动重连
+      if (enableAutoReconnect) {
+        _autoReconnect = true;
+        _scheduleReconnect();
+      }
       return false;
     }
+  }
+
+  /// 🔥 调度自动重连（指数退避算法）
+  void _scheduleReconnect() {
+    // 检查重连次数
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      print('❌ 已达到最大重连次数($_maxReconnectAttempts)，停止重连');
+      _autoReconnect = false;
+      return;
+    }
+
+    // 取消旧定时器
+    _reconnectTimer?.cancel();
+
+    // 计算延迟时间（指数退避：1s, 2s, 4s, 8s, 16s）
+    final delay = Duration(seconds: (1 << _reconnectAttempts).clamp(1, 16));
+    _reconnectAttempts++;
+
+    print('🔄 将在 ${delay.inSeconds} 秒后尝试第 $_reconnectAttempts 次重连');
+
+    // 设置定时器
+    _reconnectTimer = Timer(delay, () async {
+      print('🔄 正在尝试第 $_reconnectAttempts 次重连...');
+      final success = await connectWebSocket(enableAutoReconnect: true);
+      if (success) {
+        print('✅ 重连成功！');
+        _reconnectAttempts = 0;  // 重置重连次数
+      }
+    });
   }
 
   /// 处理WebSocket消息
@@ -534,6 +587,11 @@ class VoiceService {
     }
 
     try {
+      // 🔥 主动断开时禁用自动重连
+      _autoReconnect = false;
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+
       // 清空回调，防止重复触发
       onAudioFrameReceived = null;
       onUserTextReceived = null;
@@ -546,7 +604,7 @@ class VoiceService {
       _wsChannel = null;
       _wsSubscription = null;
       _isWsConnected = false;
-      // ✅ 精简：移除断开成功日志
+      print('✅ WebSocket已主动断开');
     } catch (e) {
       print('❌ 断开WebSocket失败: $e');
     }

@@ -322,6 +322,87 @@
                 }
             }
 
+            // 🔥 新增：嘴部动作控制器
+            startLipSync() {
+                if (!this.model || !this.isLoaded) {
+                    log('模型未加载，无法启动嘴部动作', 'warn');
+                    return;
+                }
+
+                // 停止之前的嘴部动作
+                this.stopLipSync();
+
+                log('👄 启动嘴部同步动画');
+
+                // 嘴部动作参数
+                let mouthValue = 0;
+                let direction = 1;
+                const speed = 0.15; // 张嘴速度
+                const maxOpen = 1.0; // 最大张开幅度
+
+                // 使用setInterval实现平滑的嘴部动作
+                this.lipSyncInterval = setInterval(() => {
+                    if (!this.model || !this.model.internalModel) {
+                        this.stopLipSync();
+                        return;
+                    }
+
+                    try {
+                        // 更新嘴部数值（0 -> maxOpen -> 0 循环）
+                        mouthValue += speed * direction;
+
+                        if (mouthValue >= maxOpen) {
+                            mouthValue = maxOpen;
+                            direction = -1; // 开始闭嘴
+                        } else if (mouthValue <= 0) {
+                            mouthValue = 0;
+                            direction = 1; // 开始张嘴
+                        }
+
+                        // 🔥 使用正确的 pixi-live2d-display API
+                        // 通过 internalModel.coreModel 直接设置参数值
+                        const coreModel = this.model.internalModel.coreModel;
+
+                        // ParamMouthOpenY - 控制嘴巴张开/闭合（最重要的参数）
+                        coreModel.setParameterValueById('ParamMouthOpenY', mouthValue);
+
+                        // 首次循环时输出日志
+                        if (!this._lipSyncStarted) {
+                            log(`👄 嘴部参数设置: ParamMouthOpenY = ${mouthValue.toFixed(2)}`);
+                            this._lipSyncStarted = true;
+                        }
+                    } catch (error) {
+                        log(`❌ 嘴部动作更新失败: ${error.message}`, 'error');
+                        console.error('嘴部动作错误详情:', error);
+                    }
+                }, 50); // 每50ms更新一次（20fps）
+
+                this.isLipSyncActive = true;
+            }
+
+            // 🔥 新增：停止嘴部动作
+            stopLipSync() {
+                if (this.lipSyncInterval) {
+                    clearInterval(this.lipSyncInterval);
+                    this.lipSyncInterval = null;
+                    log('👄 停止嘴部动作循环');
+                }
+
+                // 重置嘴部参数为闭合状态
+                if (this.model && this.model.internalModel) {
+                    try {
+                        const coreModel = this.model.internalModel.coreModel;
+                        coreModel.setParameterValueById('ParamMouthOpenY', 0);
+                        log('👄 嘴部参数已重置为闭合状态');
+                    } catch (error) {
+                        log(`❌ 重置嘴部参数失败: ${error.message}`, 'error');
+                    }
+                }
+
+                this.isLipSyncActive = false;
+                this._lipSyncStarted = false;
+            }
+
             hideLoading() {
                 if (this.loadingElement) {
                     this.loadingElement.style.display = 'none';
@@ -362,6 +443,9 @@
                 // 暴露快捷方法
                 window.playMotion = (group, index) => controller.playMotion(group, index);
                 window.playExpression = (name) => controller.playExpression(name);
+                // 🔥 新增：暴露嘴部动作控制方法
+                window.startLipSync = () => controller.startLipSync();
+                window.stopLipSync = () => controller.stopLipSync();
 
                 log('Live2D控制器已就绪', 'success');
 

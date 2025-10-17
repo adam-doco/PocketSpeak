@@ -107,6 +107,17 @@ class _ChatPageState extends State<ChatPage>
     _voiceService.onAudioFrameReceived = (String base64Data) {
       // ✅ 精简日志：删除高频音频帧日志
       _streamingPlayer.addAudioFrame(base64Data);
+
+      // 👄 音频帧到达时启动/刷新嘴部同步
+      if (_lipSyncController != null) {
+        if (!_lipSyncController!.isPlaying) {
+          // 第一帧：启动嘴部同步
+          _lipSyncController!.startLipSync();
+        } else {
+          // 后续帧：刷新活动状态（重置不活跃定时器）
+          _lipSyncController!.refreshActivity();
+        }
+      }
     };
 
     // 收到用户语音识别文字
@@ -153,6 +164,9 @@ class _ChatPageState extends State<ChatPage>
     _voiceService.onEmotionReceived = (String emoji) {
       _debugLog('🎭 收到emotion: $emoji');
 
+      // 👄 停止嘴部同步（AI回复结束标志）
+      _lipSyncController?.stopLipSync();
+
       // 播放对应的表情和动作
       if (_motionController != null) {
         _motionController!.playEmotionByEmoji(emoji);
@@ -171,16 +185,7 @@ class _ChatPageState extends State<ChatPage>
       if (state == 'listening' && _sessionState != 'listening') {
         _streamingPlayer.stop();
 
-        // 👄 停止嘴部同步动画
-        _lipSyncController?.stopLipSync();
-      }
-
-      // 👄 根据状态控制嘴部同步
-      if (state == 'speaking' && _sessionState != 'speaking') {
-        // AI开始说话，启动嘴部同步
-        _lipSyncController?.startLipSync();
-      } else if (state != 'speaking' && _sessionState == 'speaking') {
-        // AI停止说话，停止嘴部同步
+        // 👄 停止嘴部同步动画（用户开始新的录音）
         _lipSyncController?.stopLipSync();
       }
 

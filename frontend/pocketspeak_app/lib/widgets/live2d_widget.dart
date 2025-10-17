@@ -76,6 +76,40 @@ class Live2DController {
     await playMotion('', 3);
     await playExpression('A2生气');
   }
+
+  /// 🔥 启动嘴部同步动画
+  Future<void> startLipSync() async {
+    if (!_isInitialized || _webViewController == null) {
+      debugPrint('[Live2DController] Live2D未初始化，无法启动嘴部同步');
+      return;
+    }
+
+    try {
+      await _webViewController!.evaluateJavascript(
+        source: 'window.startLipSync();'
+      );
+      debugPrint('[Live2DController] 启动嘴部同步动画');
+    } catch (e) {
+      debugPrint('[Live2DController] 启动嘴部同步失败: $e');
+    }
+  }
+
+  /// 🔥 停止嘴部同步动画
+  Future<void> stopLipSync() async {
+    if (!_isInitialized || _webViewController == null) {
+      debugPrint('[Live2DController] Live2D未初始化，无法停止嘴部同步');
+      return;
+    }
+
+    try {
+      await _webViewController!.evaluateJavascript(
+        source: 'window.stopLipSync();'
+      );
+      debugPrint('[Live2DController] 停止嘴部同步动画');
+    } catch (e) {
+      debugPrint('[Live2DController] 停止嘴部同步失败: $e');
+    }
+  }
 }
 
 /// Live2D模型显示组件

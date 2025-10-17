@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'pages/binding_page.dart';
 import 'pages/chat_page.dart';
 import 'pages/live2d_test_page.dart'; // Live2D测试页面
+import 'pages/onboarding/welcome_page.dart'; // 欢迎页
 import 'services/api_service.dart';
+import 'services/user_storage_service.dart'; // 用户存储服务
 
 void main() {
   runApp(const PocketSpeakApp());
@@ -28,9 +30,9 @@ class PocketSpeakApp extends StatelessWidget {
       routes: {
         '/live2d_test': (context) => const Live2DTestPage(),
       },
-      // ✅ 修复：根据设备激活状态显示不同页面
-      home: FutureBuilder<bool>(
-        future: _checkActivationStatus(),
+      // ✅ V1.2: 增加用户引导流程检查
+      home: FutureBuilder<Map<String, bool>>(
+        future: _checkAppStatus(),
         builder: (context, snapshot) {
           // 加载中显示启动画面
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -64,30 +66,56 @@ class PocketSpeakApp extends StatelessWidget {
             );
           }
 
-          // ✅ 根据激活状态决定显示哪个页面
-          final isActivated = snapshot.data ?? false;
-          if (isActivated) {
-            print('✅ 设备已激活，进入聊天页面（含Live2D模型）');
-            return const ChatPage();
-          } else {
-            print('⚠️ 设备未激活，进入激活页面');
+          // ✅ 根据状态决定显示哪个页面
+          final status = snapshot.data ?? {'isActivated': false, 'isOnboardingComplete': false};
+          final isActivated = status['isActivated'] ?? false;
+          final isOnboardingComplete = status['isOnboardingComplete'] ?? false;
+
+          // V1.2: 新用户流程 - 优先完成引导流程
+          // 流程：引导流程 → 设备激活 → 聊天页面
+
+          // 1. 首先检查是否完成引导流程
+          if (!isOnboardingComplete) {
+            print('📝 新用户首次启动，进入用户引导流程');
+            return const WelcomePage();
+          }
+
+          // 2. 引导完成后，检查设备激活状态
+          if (!isActivated) {
+            print('⚠️ 引导已完成，但设备未激活，进入激活页面');
             return const BindingPage();
           }
+
+          // 3. 引导完成且设备已激活，进入主界面
+          print('✅ 用户已完成引导且设备已激活，进入聊天页面');
+          return const ChatPage();
         },
       ),
     );
   }
 
-  /// 检查设备激活状态
-  Future<bool> _checkActivationStatus() async {
+  /// V1.2: 检查应用状态（用户引导 + 设备激活）
+  Future<Map<String, bool>> _checkAppStatus() async {
     try {
+      // 检查用户引导流程
+      final isOnboardingComplete = await UserStorageService.isOnboardingComplete();
+
+      // 检查设备激活状态
       final apiService = ApiService();
       final result = await apiService.waitForBindConfirmation();
-      return result['is_activated'] ?? false;
+      final isActivated = result['is_activated'] ?? false;
+
+      return {
+        'isOnboardingComplete': isOnboardingComplete,
+        'isActivated': isActivated,
+      };
     } catch (e) {
-      print('❌ 检查激活状态失败: $e');
-      // 出错时默认进入激活页面
-      return false;
+      print('❌ 检查应用状态失败: $e');
+      // 出错时返回默认值
+      return {
+        'isOnboardingComplete': false,
+        'isActivated': false,
+      };
     }
   }
 }

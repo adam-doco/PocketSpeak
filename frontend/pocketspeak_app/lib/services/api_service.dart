@@ -7,6 +7,7 @@ class ApiService {
 
   // 存储绑定过程中的challenge值
   String? _currentChallenge;
+  // ignore: unused_field
   bool _isBindingStarted = false;
 
   /// 获取设备ID
@@ -458,6 +459,138 @@ class ApiService {
         'ready': false,
         'reason': 'check_failed',
         'message': 'WebSocket就绪状态检查失败: $e',
+      };
+    }
+  }
+
+  // ============== V1.2: 用户档案管理接口 ==============
+
+  /// 创建用户档案
+  Future<Map<String, dynamic>> createUserProfile({
+    required String userId,
+    required String deviceId,
+    required String learningGoal,
+    required String englishLevel,
+    required String ageGroup,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/user/init'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'user_id': userId,
+          'device_id': deviceId,
+          'learning_goal': learningGoal,
+          'english_level': englishLevel,
+          'age_group': ageGroup,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'message': data['message'] ?? '',
+          'user_profile': data['user_profile'],
+        };
+      } else if (response.statusCode == 400) {
+        final data = json.decode(response.body);
+        return {
+          'success': false,
+          'message': data['detail'] ?? '创建用户档案失败',
+          'user_profile': null,
+        };
+      } else {
+        throw Exception('创建用户档案失败: HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('❌ 创建用户档案异常: $e');
+      return {
+        'success': false,
+        'message': '网络错误，无法同步用户档案到后端',
+        'user_profile': null,
+      };
+    }
+  }
+
+  /// 获取用户档案
+  Future<Map<String, dynamic>> getUserProfile(String userId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/user/$userId'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'message': data['message'] ?? '',
+          'user_profile': data['user_profile'],
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'message': '用户不存在',
+          'user_profile': null,
+        };
+      } else {
+        throw Exception('获取用户档案失败: HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('❌ 获取用户档案异常: $e');
+      return {
+        'success': false,
+        'message': '网络错误，无法获取用户档案',
+        'user_profile': null,
+      };
+    }
+  }
+
+  /// 更新用户档案
+  Future<Map<String, dynamic>> updateUserProfile({
+    required String userId,
+    String? learningGoal,
+    String? englishLevel,
+    String? ageGroup,
+  }) async {
+    try {
+      final body = <String, dynamic>{};
+      if (learningGoal != null) body['learning_goal'] = learningGoal;
+      if (englishLevel != null) body['english_level'] = englishLevel;
+      if (ageGroup != null) body['age_group'] = ageGroup;
+
+      final response = await http.put(
+        Uri.parse('$baseUrl/api/user/$userId'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(body),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': data['success'] ?? false,
+          'message': data['message'] ?? '',
+          'user_profile': data['user_profile'],
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'message': '用户不存在',
+          'user_profile': null,
+        };
+      } else {
+        throw Exception('更新用户档案失败: HTTP ${response.statusCode}');
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('❌ 更新用户档案异常: $e');
+      return {
+        'success': false,
+        'message': '网络错误，无法更新用户档案',
+        'user_profile': null,
       };
     }
   }

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../chat_page.dart';
+import '../main_page.dart';
 import '../../services/user_storage_service.dart';
 
 /// 引导流程完成页
@@ -115,9 +115,10 @@ class _OnboardingCompletePageState extends State<OnboardingCompletePage> {
                   height: 56,
                   child: ElevatedButton(
                     onPressed: () {
+                      // V1.4: 跳转到主页面（底部导航栏，默认显示学习页）
                       Navigator.of(context).pushAndRemoveUntil(
                         MaterialPageRoute(
-                          builder: (context) => const ChatPage(),
+                          builder: (context) => const MainPage(),
                         ),
                         (route) => false, // 清除所有之前的路由
                       );

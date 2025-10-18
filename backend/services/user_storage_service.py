@@ -28,11 +28,11 @@ class UserStorageService:
             storage_file: 存储文件路径，默认为 backend/data/user_profiles.json
         """
         if storage_file is None:
-            # 默认存储在 backend/data/user_profiles.json
+            # V1.3: 统一使用 users.json 存储用户数据
             backend_dir = Path(__file__).parent.parent
             data_dir = backend_dir / "data"
             data_dir.mkdir(exist_ok=True)
-            storage_file = data_dir / "user_profiles.json"
+            storage_file = data_dir / "users.json"
 
         self.storage_file = storage_file
         self._ensure_storage_file()
@@ -79,7 +79,7 @@ class UserStorageService:
 
     def create_user_profile(self, user_profile: UserProfile) -> bool:
         """
-        创建新用户档案
+        创建新用户档案（V1.3 整合版本）
 
         Args:
             user_profile: 用户档案对象
@@ -88,23 +88,48 @@ class UserStorageService:
             bool: 创建是否成功
         """
         try:
+            from datetime import datetime
             profiles = self._load_all_profiles()
 
-            # 检查用户是否已存在
+            # V1.3: 如果用户已存在（通过邮箱登录创建），则更新档案信息
             if user_profile.user_id in profiles:
-                print(f"⚠️ 用户已存在: {user_profile.user_id}")
-                return False
+                print(f"ℹ️ 用户已存在，更新档案信息: {user_profile.user_id}")
+                existing_user = profiles[user_profile.user_id]
 
-            # 保存用户档案
-            profiles[user_profile.user_id] = user_profile.model_dump(mode='json')
+                # 更新 V1.2 引导流程的字段
+                existing_user['device_id'] = user_profile.device_id
+                existing_user['english_level'] = user_profile.english_level.value
+                existing_user['age_range'] = user_profile.age_group.value  # V1.2: age_group → V1.3: age_range
+                existing_user['purpose'] = user_profile.learning_goal.value  # V1.2: learning_goal → V1.3: purpose
+                existing_user['updated_at'] = datetime.now().isoformat()
+
+                profiles[user_profile.user_id] = existing_user
+            else:
+                # 新用户：创建完整的用户数据（兼容 V1.3 结构）
+                profiles[user_profile.user_id] = {
+                    "user_id": user_profile.user_id,
+                    "email": None,  # V1.2 时还没有邮箱
+                    "email_verified": False,
+                    "login_type": None,
+                    "device_id": user_profile.device_id,
+                    "english_level": user_profile.english_level.value,
+                    "age_range": user_profile.age_group.value,  # V1.2: age_group → V1.3: age_range
+                    "purpose": user_profile.learning_goal.value,  # V1.2: learning_goal → V1.3: purpose
+                    "created_at": user_profile.created_at.isoformat(),
+                    "updated_at": datetime.now().isoformat(),
+                    "last_login_at": user_profile.last_active.isoformat()
+                }
+
             success = self._save_all_profiles(profiles)
 
             if success:
-                print(f"✅ 用户档案创建成功: {user_profile.user_id}")
+                print(f"✅ 用户档案保存成功: {user_profile.user_id}")
             return success
 
         except Exception as e:
             print(f"❌ 创建用户档案失败: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def get_user_profile(self, user_id: str) -> Optional[UserProfile]:

@@ -1,0 +1,45 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "axy",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "axy2",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "shengqi",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "shengqi2",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "xxy",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "xxy2",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "kuku",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "kuku2",
+            "Value": 1.0,
+            "Blend": "Add"
+        }
+    ]
+}

@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from config.settings import settings
-from routers import device, ws_lifecycle, voice_chat, user
+from routers import device, ws_lifecycle, voice_chat, user, auth_router
 from core.device_manager import print_device_debug_info
 
 # 配置应用日志
@@ -64,6 +64,7 @@ app.include_router(device.router)
 app.include_router(ws_lifecycle.router)
 app.include_router(voice_chat.router)
 app.include_router(user.router)  # V1.2: 用户管理路由
+app.include_router(auth_router.router)  # V1.3: 认证路由
 
 
 # 根路径

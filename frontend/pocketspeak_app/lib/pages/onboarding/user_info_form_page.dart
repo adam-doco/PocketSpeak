@@ -4,6 +4,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import '../../models/user_profile.dart';
 import '../../services/user_storage_service.dart';
 import '../../services/api_service.dart';
+import '../../services/auth_service.dart'; // V1.3: 用于获取登录后的 user_id
 import 'onboarding_complete_page.dart';
 
 /// 用户信息表单页
@@ -332,9 +333,18 @@ class _UserInfoFormPageState extends State<UserInfoFormPage> {
     });
 
     try {
-      // 生成 UUID
-      const uuid = Uuid();
-      final userId = uuid.v4();
+      // V1.3: 优先使用登录后的 user_id，如果没有则生成新的
+      final authService = AuthService();
+      String userId = await authService.getUserId() ?? '';
+
+      if (userId.isEmpty) {
+        // 未登录用户，生成新的 UUID
+        const uuid = Uuid();
+        userId = uuid.v4();
+        print('ℹ️  未登录用户，生成新 ID: $userId');
+      } else {
+        print('✅ 使用登录后的用户 ID: $userId');
+      }
 
       // 获取设备 ID
       final deviceId = await _getDeviceId();

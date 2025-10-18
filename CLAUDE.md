@@ -18,7 +18,8 @@ Claude 在开始任何开发任务（撰写代码、文档、配置等）之前�
 📄 backend_claude_memory/specs/development_roadmap.md
 熟悉开发流程、角色分工、Claude 的职责范围。
 	3.	当前版本的 PRD
-📄 backend_claude_memory/specs/pocketspeak_PRD_V1.0.md（如当前开发版本为 v1.0）
+📄 backend_claude_memory/specs/pocketspeak_PRD_V1.0.md
+📄 backend_claude_memory/specs/pocketspeak_PRD_V1.2.md（当前开发版本为 v1.2） ✅【新增】
 确认当前任务是否符合 PRD 中功能需求。
 	4.	命名规范文档
 📄 backend_claude_memory/specs/naming_convention.md

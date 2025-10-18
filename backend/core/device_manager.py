@@ -10,13 +10,11 @@ import hashlib
 from typing import Dict, Optional, Tuple
 from pathlib import Path
 
-# 添加 py-xiaozhi 模块到 Python 路径
-current_dir = Path(__file__).parent.parent
-py_xiaozhi_path = current_dir / "libs" / "py_xiaozhi" / "src"
-sys.path.insert(0, str(py_xiaozhi_path))
+# 注意：sys.path 已在 setup_paths.py 中设置，这里不再重复添加
+# py-xiaozhi 模块路径已包含在 sys.path 中
 
 try:
-    from utils.device_fingerprint import DeviceFingerprint
+    from src.utils.device_fingerprint import DeviceFingerprint
 except ImportError as e:
     print(f"警告: 无法导入 py-xiaozhi 模块: {e}")
     DeviceFingerprint = None

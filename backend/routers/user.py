@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-用户管理 API 路由 - PocketSpeak V1.2
+用户管理 API 路由 - PocketSpeak V1.2 & V1.3 & V1.4
 提供用户档案的创建、更新、查询等接口
+V1.3 新增：GET /api/user/me 获取当前登录用户信息
+V1.4 新增：用户信息、学习统计、设置、登出等接口
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict
+from datetime import date
 
 from models.user_profile import (
     UserProfile,
@@ -16,12 +19,165 @@ from models.user_profile import (
     EnglishLevel,
     AgeGroup
 )
+from models.user_model import User
 from services.user_storage_service import user_storage_service
+from deps.dependencies import get_current_user
+from schemas.user_schemas import (
+    UserInfoResponse,
+    UserStatsResponse,
+    UserSettingsResponse,
+    LogoutResponse
+)
 
 
 # 创建路由器
 router = APIRouter(prefix="/api/user", tags=["user"])
 
+
+@router.get("/me")
+async def get_current_user_info(current_user: User = Depends(get_current_user)) -> Dict:
+    """
+    获取当前登录用户信息 - V1.3
+
+    需要认证：Bearer Token
+
+    Args:
+        current_user: 当前登录用户（通过 Token 验证）
+
+    Returns:
+        Dict: 用户信息
+
+    Raises:
+        HTTPException: 401 - 未认证或 Token 无效
+    """
+    print(f"\n🔍 获取当前用户信息: {current_user.email}")
+
+    return {
+        "success": True,
+        "user": {
+            "user_id": current_user.user_id,
+            "email": current_user.email,
+            "email_verified": current_user.email_verified,
+            "login_type": current_user.login_type,
+            "device_id": current_user.device_id,
+            "english_level": current_user.english_level,
+            "age_range": current_user.age_range,
+            "purpose": current_user.purpose,
+            "created_at": current_user.created_at.isoformat(),
+            "last_login_at": current_user.last_login_at.isoformat() if current_user.last_login_at else None
+        }
+    }
+
+
+# ==================== V1.4 新增接口（必须在 /{user_id} 之前定义） ====================
+
+@router.get("/info", response_model=UserInfoResponse)
+async def get_user_info(current_user: User = Depends(get_current_user)) -> UserInfoResponse:
+    """
+    获取用户基础信息 - V1.4
+
+    需要认证：Bearer Token
+
+    Returns:
+        UserInfoResponse: 用户基础信息（昵称、头像、等级等）
+    """
+    print(f"\n📋 获取用户信息: {current_user.email}")
+
+    # 等级中文标签映射
+    level_labels = {
+        "A1": "入门",
+        "A2": "初级",
+        "B1": "中级",
+        "B2": "中高级",
+        "C1": "高级",
+        "C2": "精通"
+    }
+
+    level = current_user.english_level.value if current_user.english_level else None
+    level_label = level_labels.get(level) if level else None
+
+    return UserInfoResponse(
+        user_id=current_user.user_id,
+        nickname=current_user.nickname or current_user.email.split('@')[0] if current_user.email else "用户",
+        avatar_url=current_user.avatar_url,
+        email=current_user.email,
+        level=level,
+        level_label=level_label
+    )
+
+
+@router.get("/stats/today", response_model=UserStatsResponse)
+async def get_user_stats_today(current_user: User = Depends(get_current_user)) -> UserStatsResponse:
+    """
+    获取今日学习统计 - V1.4
+
+    需要认证：Bearer Token
+
+    Returns:
+        UserStatsResponse: 今日学习统计数据
+
+    Note:
+        当前返回 Mock 数据，后续版本接入真实学习记录
+    """
+    print(f"\n📊 获取今日学习统计: {current_user.email}")
+
+    # TODO: 后续版本从学习记录数据库获取真实数据
+    # 当前返回 Mock 数据
+    return UserStatsResponse(
+        date=str(date.today()),
+        study_minutes=0,  # Mock: 今日学习时长
+        free_talk_count=0,  # Mock: 自由对话次数
+        sentence_repeat_count=0  # Mock: 句子跟读次数
+    )
+
+
+@router.get("/settings", response_model=UserSettingsResponse)
+async def get_user_settings(current_user: User = Depends(get_current_user)) -> UserSettingsResponse:
+    """
+    获取用户设置项 - V1.4
+
+    需要认证：Bearer Token
+
+    Returns:
+        UserSettingsResponse: 设置页面配置项
+    """
+    print(f"\n⚙️ 获取用户设置: {current_user.email}")
+
+    # 返回设置项配置（支持后期动态开关）
+    return UserSettingsResponse(
+        account_enabled=True,
+        show_terms=True,
+        show_privacy=True,
+        logout_enabled=True
+    )
+
+
+@router.post("/logout", response_model=LogoutResponse)
+async def logout_user(current_user: User = Depends(get_current_user)) -> LogoutResponse:
+    """
+    用户退出登录 - V1.4
+
+    需要认证：Bearer Token
+
+    Returns:
+        LogoutResponse: 退出登录结果
+
+    Note:
+        当前实现为客户端主动退出，服务端不维护 Token 黑名单
+        客户端需要清除本地存储的 Token
+    """
+    print(f"\n👋 用户退出登录: {current_user.email}")
+
+    # TODO: 后续版本可以实现 Token 黑名单机制
+    # 当前由客户端负责清除 Token
+
+    return LogoutResponse(
+        success=True,
+        message="退出登录成功"
+    )
+
+
+# ==================== V1.2 用户档案接口 ====================
 
 @router.post("/init", response_model=UserProfileResponse)
 async def create_user_profile(request: UserProfileCreateRequest):

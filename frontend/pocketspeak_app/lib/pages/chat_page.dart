@@ -368,7 +368,7 @@ class _ChatPageState extends State<ChatPage>
     setState(() {
       _messages.add(ChatMessage(
         messageId: 'welcome_${DateTime.now().millisecondsSinceEpoch}',
-        text: "你好！我是小智AI，你的英语学习伙伴。让我们开始一段有趣的英语对话吧！🎯",
+        text: "你好！我是Zoe，你的英语学习伙伴。让我们开始一段有趣的英语对话吧！🎯",
         isUser: false,
         timestamp: DateTime.now(),
         hasAudio: false,

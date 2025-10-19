@@ -8,7 +8,7 @@ import 'dart:async';
 
 import '../../services/auth_service.dart';
 import '../onboarding/welcome_page.dart';
-import '../chat_page.dart';
+import '../main_page.dart';
 
 /// 登录页面
 class LoginPage extends StatefulWidget {
@@ -144,17 +144,17 @@ class _LoginPageState extends State<LoginPage> {
 
       if (mounted) {
         if (needsOnboarding) {
-          // 跳转到测评页（V1.2）
+          // 跳转到测评页（V1.2 新用户）
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (context) => const WelcomePage(),
             ),
           );
         } else {
-          // 跳转到聊天页
+          // 跳转到主页（V1.4 已注册用户）
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (context) => const ChatPage(),
+              builder: (context) => const MainPage(),
             ),
           );
         }

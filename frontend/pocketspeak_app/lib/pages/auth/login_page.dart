@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';  // V1.5: 保存onboarding标志
 
 import '../../services/auth_service.dart';
 import '../onboarding/welcome_page.dart';
@@ -141,6 +142,13 @@ class _LoginPageState extends State<LoginPage> {
 
       // 判断是否需要完成测评
       final needsOnboarding = user['english_level'] == null;
+
+      // ✅ V1.5修复：为已完成引导的用户保存onboarding标志
+      if (!needsOnboarding) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('onboarding_complete', true);
+        print('✅ 已完成引导的用户，保存onboarding标志');
+      }
 
       if (mounted) {
         if (needsOnboarding) {

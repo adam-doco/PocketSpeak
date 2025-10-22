@@ -1,0 +1,25 @@
+# -*- coding: utf-8 -*-
+# 外部API配置文件模板 - PocketSpeak V1.5.1
+# 使用说明：将此文件复制为 external_apis.yaml 并填入真实的API密钥
+
+# DeepSeek AI 配置（V1.5.1新增 - 性能优化）
+deepseek:
+  enabled: true
+  api_key: "your-deepseek-api-key-here"
+  base_url: "https://api.deepseek.com/v1"
+  model: "deepseek-chat"  # 使用的模型
+  timeout: 15  # 请求超时时间（秒）- 降低以加快响应
+  max_tokens: 300  # 最大返回token数 - 减少以加快生成速度
+
+# 有道翻译API配置
+youdao:
+  enabled: true
+  app_id: "your-youdao-app-id-here"
+  app_key: "your-youdao-app-key-here"
+  base_url: "https://openapi.youdao.com/api"
+  timeout: 10  # 请求超时时间（秒）
+
+  # 查询参数配置
+  default_from: "en"       # 源语言：英文
+  default_to: "zh-CHS"     # 目标语言：简体中文
+  sign_type: "v3"          # 签名类型

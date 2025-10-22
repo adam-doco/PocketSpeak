@@ -1,0 +1,36 @@
+{
+  "495a43dc-7163-4f53-b1b7-8a34bb78ca3e": {
+    "words": [
+      {
+        "word": "sure",
+        "definition": "adj.. 确信的，有把握的",
+        "phonetic": "/ʃʊr/",
+        "created_at": "2025-10-22T20:15:08.702494"
+      },
+      {
+        "word": "good",
+        "definition": "adj.. 好的，优质的",
+        "phonetic": "/ɡʊd/",
+        "created_at": "2025-10-22T19:58:43.529625"
+      },
+      {
+        "word": "garlic",
+        "definition": "n.. 大蒜，蒜头",
+        "phonetic": "/ˈɡɑːrlɪk/",
+        "created_at": "2025-10-22T19:50:47.943005"
+      },
+      {
+        "word": "hamburger",
+        "definition": "汉堡",
+        "phonetic": "/ˈhæm.bə.ɡə/",
+        "created_at": "2025-10-20T19:53:34.840495"
+      },
+      {
+        "word": "water",
+        "definition": "水",
+        "phonetic": "/ˈwɔtəɹ/",
+        "created_at": "2025-10-20T03:18:46.787955"
+      }
+    ]
+  }
+}

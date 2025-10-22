@@ -9,6 +9,7 @@
 import 'package:flutter/material.dart';
 import '../services/user_service.dart';
 import 'settings_page.dart';
+import 'vocab_list_page.dart';  // V1.5: 生词本页面
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -253,6 +254,18 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
             child: Column(
               children: [
+                // V1.5: 生词本入口
+                _buildMenuItem(
+                  icon: Icons.book_outlined,
+                  title: '我的生词本',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const VocabListPage()),
+                    );
+                  },
+                ),
+                const Divider(height: 1),
                 _buildMenuItem(
                   icon: Icons.account_circle_outlined,
                   title: '账号管理',

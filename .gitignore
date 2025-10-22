@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Backend specific
+backend/__pycache__/
+backend/**/__pycache__/
+backend/data/audio_cache/
+backend/data/*.db
+
+# API密钥配置文件 - 包含敏感信息,不应提交
+backend/config/external_apis.yaml
+
+# Flutter/Dart
+frontend/pocketspeak_app/.dart_tool/
+frontend/pocketspeak_app/.flutter-plugins
+frontend/pocketspeak_app/.flutter-plugins-dependencies
+frontend/pocketspeak_app/.packages
+frontend/pocketspeak_app/.pub-cache/
+frontend/pocketspeak_app/.pub/
+frontend/pocketspeak_app/build/
+frontend/pocketspeak_app/ios/Pods/
+frontend/pocketspeak_app/ios/.symlinks/
+frontend/pocketspeak_app/ios/Flutter/Flutter.framework
+frontend/pocketspeak_app/ios/Flutter/Flutter.podspec
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log

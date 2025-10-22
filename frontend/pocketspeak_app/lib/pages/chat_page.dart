@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:convert';  // V1.5: JSON编解码
 import 'package:flutter/material.dart';
-import 'package:just_audio/just_audio.dart';
+import 'package:flutter/gestures.dart';  // V1.5: 单词点击识别
+import 'package:shared_preferences/shared_preferences.dart';  // V1.5: 聊天记录持久化
 import '../services/api_service.dart';
 import '../services/voice_service.dart';
 import '../services/audio_player_service.dart';
@@ -9,6 +11,8 @@ import '../services/seamless_audio_player.dart';  // 🚀 无缝音频播放器�
 import '../widgets/live2d_widget.dart';  // 🎭 Live2D模型组件
 import '../services/motion_controller.dart';  // 🎭 动作播放控制器
 import '../services/lip_sync_controller.dart';  // 👄 嘴部同步控制器
+import '../services/word_service.dart';  // V1.5: 单词查询服务
+import '../widgets/word_popup_sheet.dart';  // V1.5: 单词弹窗组件
 
 class ChatMessage {
   final String messageId;
@@ -29,6 +33,7 @@ class ChatMessage {
     this.audioData,
   });
 
+  // 从后端API响应创建消息
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
       messageId: json['message_id'] ?? '',
@@ -38,6 +43,32 @@ class ChatMessage {
       hasAudio: json['has_audio'] ?? false,
       audioData: json['audio_data'],  // 获取Base64音频数据
     );
+  }
+
+  // V1.5: 从本地存储加载消息
+  factory ChatMessage.fromStorage(Map<String, dynamic> json) {
+    return ChatMessage(
+      messageId: json['messageId'] ?? '',
+      text: json['text'] ?? '',
+      isUser: json['isUser'] ?? false,
+      timestamp: DateTime.parse(json['timestamp']),
+      hasAudio: json['hasAudio'] ?? false,
+      audioUrl: json['audioUrl'],
+      audioData: json['audioData'],
+    );
+  }
+
+  // V1.5: 转换为JSON用于本地存储
+  Map<String, dynamic> toStorage() {
+    return {
+      'messageId': messageId,
+      'text': text,
+      'isUser': isUser,
+      'timestamp': timestamp.toIso8601String(),
+      'hasAudio': hasAudio,
+      'audioUrl': audioUrl,
+      'audioData': audioData,
+    };
   }
 }
 
@@ -62,6 +93,7 @@ class _ChatPageState extends State<ChatPage>
   final ApiService _apiService = ApiService();
   final AudioPlayerService _audioPlayerService = AudioPlayerService();
   final SeamlessAudioPlayer _streamingPlayer = SeamlessAudioPlayer();  // 🚀 无缝音频播放器
+  final WordService _wordService = WordService();  // V1.5: 单词查询服务
 
   // 状态管理
   bool _isSessionInitialized = false;
@@ -98,6 +130,7 @@ class _ChatPageState extends State<ChatPage>
   void initState() {
     super.initState();
     _setupAnimations();
+    _loadChatHistory();  // V1.5: 加载聊天历史
     _initializeVoiceSession();
   }
 
@@ -125,16 +158,13 @@ class _ChatPageState extends State<ChatPage>
       _debugLog('📝 收到用户文字: $text');
 
       if (_useStreamingPlayback) {
-        setState(() {
-          final userMessage = ChatMessage(
-            messageId: 'user_${DateTime.now().millisecondsSinceEpoch}',
-            text: text,
-            isUser: true,
-            timestamp: DateTime.now(),
-          );
-          _messages.add(userMessage);
-        });
-        _scrollToBottom();
+        final userMessage = ChatMessage(
+          messageId: 'user_${DateTime.now().millisecondsSinceEpoch}',
+          text: text,
+          isUser: true,
+          timestamp: DateTime.now(),
+        );
+        _addMessageAndSave(userMessage);  // V1.5: 保存消息
       }
     };
 
@@ -144,19 +174,18 @@ class _ChatPageState extends State<ChatPage>
 
       // 🚀 只在流式模式下显示（避免与轮询重复）
       if (_useStreamingPlayback) {
+        final aiMessage = ChatMessage(
+          messageId: 'ai_${DateTime.now().millisecondsSinceEpoch}',
+          text: text,
+          isUser: false,
+          timestamp: DateTime.now(),
+          hasAudio: false,  // 音频通过流式播放，不需要关联
+        );
+        _addMessageAndSave(aiMessage);  // V1.5: 保存聊天历史
         setState(() {
-          final aiMessage = ChatMessage(
-            messageId: 'ai_${DateTime.now().millisecondsSinceEpoch}',
-            text: text,
-            isUser: false,
-            timestamp: DateTime.now(),
-            hasAudio: false,  // 音频通过流式播放，不需要关联
-          );
-          _messages.add(aiMessage);
           _isProcessing = false;
         });
         _typingController.stop();
-        _scrollToBottom();
       }
     };
 
@@ -231,7 +260,7 @@ class _ChatPageState extends State<ChatPage>
   /// 初始化语音会话
   Future<void> _initializeVoiceSession() async {
     try {
-      // ✅ 精简：移除初始化日志
+      print('🔄 [V1.5] 开始初始化语音会话...');
 
       // 显示加载提示
       setState(() {
@@ -239,44 +268,61 @@ class _ChatPageState extends State<ChatPage>
         _listeningText = "正在初始化语音会话...";
       });
 
-      // 初始化语音会话
+      // 初始化语音会话 (添加15秒超时)
       final result = await _voiceService.initSession(
         autoPlayTts: false,  // 前端播放音频,后端不播放
         saveConversation: true,
         enableEchoCancellation: true,
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          print('⏱️ [V1.5] 会话初始化超时');
+          return {'success': false, 'message': '初始化超时,请检查网络连接'};
+        },
       );
 
-      if (result['success'] == true) {
-        setState(() {
-          _isSessionInitialized = true;
-          _sessionState = result['state'] ?? 'ready';
-          _isProcessing = false;
-          _listeningText = "";
-        });
+      print('📋 [V1.5] 会话初始化结果: $result');
 
-        // ✅ 精简：移除成功日志
+      if (result['success'] == true) {
+        print('✅ [V1.5] 会话初始化成功，准备连接WebSocket');
 
         // 🚀 连接WebSocket接收实时音频推送
         final wsConnected = await _voiceService.connectWebSocket();
+
         if (wsConnected) {
+          print('✅ [V1.5] WebSocket连接成功');
+
           // ✅ 连接成功后再设置回调，避免被清空
           _setupWebSocketCallbacks();
 
           setState(() {
+            _isSessionInitialized = true;
+            _sessionState = result['state'] ?? 'ready';
             _useStreamingPlayback = true;  // 启用流式播放
+            _isProcessing = false;
+            _listeningText = "";
           });
-          // ✅ 精简：移除WebSocket连接成功日志
         } else {
-          _debugLog('⚠️ WebSocket连接失败');
+          print('❌ [V1.5] WebSocket连接失败！会话未完全初始化');
+          setState(() {
+            _isSessionInitialized = false;  // ← 关键修复：标记为未初始化
+            _isProcessing = false;
+            _listeningText = "";
+          });
+          _showSnackBar('WebSocket连接失败，请重试');
         }
 
-        // 加载欢迎消息
-        _addWelcomeMessage();
+        // V1.5: 只在聊天历史为空时添加欢迎消息
+        if (_messages.isEmpty) {
+          _addWelcomeMessage();
+        }
 
         // ❌ 删除旧逻辑: 不再启动状态轮询，完全依赖WebSocket推送
         // _startStatusPolling();
       } else {
+        print('❌ [V1.5] 会话初始化失败: ${result['message']}');
         setState(() {
+          _isSessionInitialized = false;
           _isProcessing = false;
           _listeningText = "";
         });
@@ -285,8 +331,9 @@ class _ChatPageState extends State<ChatPage>
         _showErrorDialog('初始化失败', result['message'] ?? '无法初始化语音会话');
       }
     } catch (e) {
-      _debugLog('❌ 初始化异常: $e');
+      print('❌ [V1.5] 初始化异常: $e');
       setState(() {
+        _isSessionInitialized = false;
         _isProcessing = false;
         _listeningText = "";
       });
@@ -322,18 +369,16 @@ class _ChatPageState extends State<ChatPage>
             latestMessage['user_text'] != null) {
           final userText = latestMessage['user_text'] as String;
 
-          setState(() {
-            _messages.add(ChatMessage(
-              messageId: messageId,
-              text: userText,
-              isUser: true,
-              timestamp: DateTime.now(),
-            ));
-          });
+          final userMessage = ChatMessage(
+            messageId: messageId,
+            text: userText,
+            isUser: true,
+            timestamp: DateTime.now(),
+          );
+          _addMessageAndSave(userMessage);  // V1.5: 保存聊天历史
 
           // 记录已处理的消息ID
           _lastProcessedMessageId = messageId;
-          _scrollToBottom();
 
           // ✅ 只在实际添加用户消息时打印日志
           _debugLog('✅ 添加用户语音识别文字: $userText (message_id: $messageId)');
@@ -365,16 +410,14 @@ class _ChatPageState extends State<ChatPage>
   */
 
   void _addWelcomeMessage() {
-    setState(() {
-      _messages.add(ChatMessage(
-        messageId: 'welcome_${DateTime.now().millisecondsSinceEpoch}',
-        text: "你好！我是Zoe，你的英语学习伙伴。让我们开始一段有趣的英语对话吧！🎯",
-        isUser: false,
-        timestamp: DateTime.now(),
-        hasAudio: false,
-      ));
-    });
-    _scrollToBottom();
+    final welcomeMessage = ChatMessage(
+      messageId: 'welcome_${DateTime.now().millisecondsSinceEpoch}',
+      text: "你好！我是Zoe，你的英语学习伙伴。让我们开始一段有趣的英语对话吧！🎯",
+      isUser: false,
+      timestamp: DateTime.now(),
+      hasAudio: false,
+    );
+    _addMessageAndSave(welcomeMessage);  // V1.5: 保存聊天历史
   }
 
   /// 开始语音录音
@@ -468,18 +511,19 @@ class _ChatPageState extends State<ChatPage>
 
     try {
       // 添加用户消息到UI
+      final userMessage = ChatMessage(
+        messageId: 'user_${DateTime.now().millisecondsSinceEpoch}',
+        text: text,
+        isUser: true,
+        timestamp: DateTime.now(),
+      );
+      _addMessageAndSave(userMessage);  // V1.5: 保存聊天历史
+
       setState(() {
-        _messages.add(ChatMessage(
-          messageId: 'user_${DateTime.now().millisecondsSinceEpoch}',
-          text: text,
-          isUser: true,
-          timestamp: DateTime.now(),
-        ));
         _isProcessing = true;
       });
 
       _textController.clear();
-      _scrollToBottom();
       _typingController.repeat();
 
       // 调用后端发送文本API
@@ -592,13 +636,13 @@ class _ChatPageState extends State<ChatPage>
                 hasAudio: true,
               );
 
+              _addMessageAndSave(aiMessage);  // V1.5: 保存聊天历史
+
               setState(() {
-                _messages.add(aiMessage);
                 _isProcessing = false;
               });
 
               _typingController.stop();
-              _scrollToBottom();
 
               _debugLog('✅ 创建AI消息气泡: $text');
 
@@ -682,6 +726,8 @@ class _ChatPageState extends State<ChatPage>
 
   @override
   void dispose() {
+    print('🔄 [V1.5] ChatPage dispose()被调用');
+
     // ❌ 删除旧逻辑: 不再使用轮询
     // _statusPollingTimer?.cancel();
     // _sentencePollingTimer?.cancel();
@@ -696,11 +742,14 @@ class _ChatPageState extends State<ChatPage>
     _lipSyncController?.dispose();
 
     // 🚀 清理WebSocket和流式播放器
+    print('🔄 [V1.5] 断开WebSocket连接');
     _voiceService.disconnectWebSocket();
     _streamingPlayer.dispose();
 
-    // 关闭语音会话
-    _voiceService.closeSession();
+    // V1.5修复: 不在dispose中关闭会话，避免HTTP请求被中断
+    // 会话会在后端超时后自动清理，或在下次初始化时复用
+    // _voiceService.closeSession();
+    print('ℹ️ [V1.5] 保留后端会话以便复用');
 
     super.dispose();
   }
@@ -855,14 +904,17 @@ class _ChatPageState extends State<ChatPage>
                   ),
                 ],
               ),
-              child: Text(
-                message.text,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: message.isUser ? Colors.white : const Color(0xFF2D3436),
-                  height: 1.3,  // ✅ 缩短行高: 1.4 → 1.3
-                ),
-              ),
+              // V1.5: 如果是AI消息，使用RichText渲染可点击单词
+              child: message.isUser
+                  ? Text(
+                      message.text,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.white,
+                        height: 1.3,
+                      ),
+                    )
+                  : _buildClickableText(message.text),
             ),
           ),
         ],
@@ -927,6 +979,206 @@ class _ChatPageState extends State<ChatPage>
         borderRadius: BorderRadius.circular(3),
       ),
     );
+  }
+
+  // ==================== V1.5: 单词识别与点击功能 ====================
+
+  /// 构建可点击的文本（将英文单词变成可点击的）
+  Widget _buildClickableText(String text) {
+    // 正则表达式：匹配英文单词（仅字母，长度至少2个字符）
+    final wordRegex = RegExp(r'\b[a-zA-Z]{2,}\b');
+    final matches = wordRegex.allMatches(text);
+
+    if (matches.isEmpty) {
+      // 没有英文单词，直接返回普通Text
+      return Text(
+        text,
+        style: const TextStyle(
+          fontSize: 14,
+          color: Color(0xFF2D3436),
+          height: 1.3,
+        ),
+      );
+    }
+
+    // 构建 TextSpan 列表
+    final spans = <TextSpan>[];
+    int lastEnd = 0;
+
+    for (final match in matches) {
+      // 添加非单词部分（普通文本）
+      if (match.start > lastEnd) {
+        spans.add(
+          TextSpan(
+            text: text.substring(lastEnd, match.start),
+            style: const TextStyle(
+              fontSize: 14,
+              color: Color(0xFF2D3436),
+              height: 1.3,
+            ),
+          ),
+        );
+      }
+
+      // 添加单词部分（可点击，但样式与普通文本一致）
+      final word = match.group(0)!;
+      spans.add(
+        TextSpan(
+          text: word,
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFF2D3436),  // 与普通文本颜色一致
+            height: 1.3,
+          ),
+          recognizer: TapGestureRecognizer()
+            ..onTap = () => _onWordTap(word),
+        ),
+      );
+
+      lastEnd = match.end;
+    }
+
+    // 添加最后的非单词部分
+    if (lastEnd < text.length) {
+      spans.add(
+        TextSpan(
+          text: text.substring(lastEnd),
+          style: const TextStyle(
+            fontSize: 14,
+            color: Color(0xFF2D3436),
+            height: 1.3,
+          ),
+        ),
+      );
+    }
+
+    return RichText(
+      text: TextSpan(children: spans),
+    );
+  }
+
+  /// 处理单词点击事件（V1.5.1 - 优化加载体验）
+  Future<void> _onWordTap(String word) async {
+    print('📖 用户点击单词: $word');
+
+    if (!mounted) return;
+
+    // 显示加载对话框
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text(
+                  'AI正在查询单词...',
+                  style: TextStyle(fontSize: 16),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // 查询单词释义（V1.5.1）
+    try {
+      final result = await _wordService.lookupWord(word);
+
+      if (!mounted) return;
+
+      // 关闭加载对话框
+      Navigator.of(context).pop();
+
+      // 显示单词弹窗
+      WordPopupSheet.show(context, result);
+    } catch (e) {
+      if (!mounted) return;
+
+      // 关闭加载对话框
+      Navigator.of(context).pop();
+
+      // 显示错误提示
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('查询失败: $e'),
+          backgroundColor: Colors.redAccent,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  // ==================== V1.5: 聊天记录持久化 ====================
+
+  static const String _chatHistoryKey = 'chat_history';
+  static const int _maxHistoryMessages = 100;  // 最多保存100条消息
+
+  /// 加载聊天历史
+  Future<void> _loadChatHistory() async {
+    try {
+      print('🔄 [V1.5] 开始加载聊天历史...');
+      final prefs = await SharedPreferences.getInstance();
+      final historyJson = prefs.getString(_chatHistoryKey);
+
+      if (historyJson != null) {
+        final List<dynamic> historyList = jsonDecode(historyJson);
+        final loadedMessages = historyList
+            .map((json) => ChatMessage.fromStorage(json as Map<String, dynamic>))
+            .toList();
+
+        setState(() {
+          _messages.clear();
+          _messages.addAll(loadedMessages);
+        });
+
+        print('✅ [V1.5] 加载聊天历史成功: ${_messages.length} 条消息');
+
+        // 滚动到底部
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollToBottom();
+        });
+      } else {
+        print('ℹ️ [V1.5] 无聊天历史记录');
+      }
+    } catch (e) {
+      print('❌ [V1.5] 加载聊天历史失败: $e');
+    }
+  }
+
+  /// 保存聊天历史
+  Future<void> _saveChatHistory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // 只保存最近的N条消息
+      final messagesToSave = _messages.length > _maxHistoryMessages
+          ? _messages.sublist(_messages.length - _maxHistoryMessages)
+          : _messages;
+
+      final historyList = messagesToSave.map((msg) => msg.toStorage()).toList();
+      final historyJson = jsonEncode(historyList);
+
+      await prefs.setString(_chatHistoryKey, historyJson);
+      print('✅ 保存聊天历史: ${messagesToSave.length} 条消息');
+    } catch (e) {
+      print('❌ 保存聊天历史失败: $e');
+    }
+  }
+
+  /// 添加消息并保存
+  void _addMessageAndSave(ChatMessage message) {
+    setState(() {
+      _messages.add(message);
+    });
+    _saveChatHistory();  // 自动保存
+    _scrollToBottom();
   }
 
   Widget _buildInputArea() {

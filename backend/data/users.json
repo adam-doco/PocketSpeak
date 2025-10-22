@@ -108,13 +108,13 @@
     "email": "888@gmail.com",
     "email_verified": true,
     "login_type": "email_code",
-    "device_id": "7A178E20-9E4F-4382-8E54-76E9136F5E93",
+    "device_id": "E90574E6-9ED7-4548-A65C-929F5DDCD639",
     "english_level": "A1",
     "age_range": "21-30",
     "purpose": "business",
     "created_at": "2025-10-19T03:02:39.944004",
-    "updated_at": "2025-10-19T03:02:49.711168",
-    "last_login_at": "2025-10-19T03:02:39.944092"
+    "updated_at": "2025-10-22T19:57:36.456003",
+    "last_login_at": "2025-10-22T19:57:36.455967"
   },
   "bf094774-f01a-4315-b4a1-e81954bf2434": {
     "user_id": "bf094774-f01a-4315-b4a1-e81954bf2434",
@@ -141,5 +141,18 @@
     "created_at": "2025-10-19T03:12:36.564412",
     "updated_at": "2025-10-19T03:12:43.218895",
     "last_login_at": "2025-10-19T03:12:36.564442"
+  },
+  "301d55d9-30fb-4143-a614-46d593ab3d5a": {
+    "user_id": "301d55d9-30fb-4143-a614-46d593ab3d5a",
+    "email": "8889@gmail.com",
+    "email_verified": true,
+    "login_type": "email_code",
+    "device_id": "8349C5D9-0A7F-47C7-8707-13547D5A8A31",
+    "english_level": "A1",
+    "age_range": "12-20",
+    "purpose": "business",
+    "created_at": "2025-10-19T22:29:32.539655",
+    "updated_at": "2025-10-19T22:29:41.783480",
+    "last_login_at": "2025-10-19T22:29:32.539677"
   }
 }

@@ -13,6 +13,12 @@ import '../services/motion_controller.dart';  // 🎭 动作播放控制器
 import '../services/lip_sync_controller.dart';  // 👄 嘴部同步控制器
 import '../services/word_service.dart';  // V1.5: 单词查询服务
 import '../widgets/word_popup_sheet.dart';  // V1.5: 单词弹窗组件
+import '../services/speech_eval_service.dart';  // V1.6: 语音评分服务
+import '../models/speech_feedback.dart';  // V1.6: 语音评分数据模型
+import '../widgets/speech_score_card.dart';  // V1.6: 语音评分卡片
+import '../widgets/pronunciation_analysis_modal.dart';  // V1.6: 发音分析弹窗
+import '../widgets/grammar_suggestion_modal.dart';  // V1.6: 语法建议弹窗
+import '../widgets/expression_improvement_modal.dart';  // V1.6: 表达优化弹窗
 
 class ChatMessage {
   final String messageId;
@@ -22,6 +28,7 @@ class ChatMessage {
   final bool hasAudio;
   final String? audioUrl;
   final String? audioData;  // Base64编码的音频数据
+  final SpeechFeedbackResponse? speechFeedback;  // V1.6: 语音评分数据
 
   ChatMessage({
     required this.messageId,
@@ -31,6 +38,7 @@ class ChatMessage {
     this.hasAudio = false,
     this.audioUrl,
     this.audioData,
+    this.speechFeedback,  // V1.6: 语音评分
   });
 
   // 从后端API响应创建消息
@@ -94,6 +102,7 @@ class _ChatPageState extends State<ChatPage>
   final AudioPlayerService _audioPlayerService = AudioPlayerService();
   final SeamlessAudioPlayer _streamingPlayer = SeamlessAudioPlayer();  // 🚀 无缝音频播放器
   final WordService _wordService = WordService();  // V1.5: 单词查询服务
+  final SpeechEvalService _speechEvalService = SpeechEvalService();  // V1.6: 语音评分服务
 
   // 状态管理
   bool _isSessionInitialized = false;
@@ -158,13 +167,19 @@ class _ChatPageState extends State<ChatPage>
       _debugLog('📝 收到用户文字: $text');
 
       if (_useStreamingPlayback) {
+        // V1.6优化: 先立即显示用户消息（不带评分），避免延迟
+        final messageId = 'user_${DateTime.now().millisecondsSinceEpoch}';
         final userMessage = ChatMessage(
-          messageId: 'user_${DateTime.now().millisecondsSinceEpoch}',
+          messageId: messageId,
           text: text,
           isUser: true,
           timestamp: DateTime.now(),
+          speechFeedback: null,  // 初始无评分数据
         );
-        _addMessageAndSave(userMessage);  // V1.5: 保存消息
+        _addMessageAndSave(userMessage);  // 立即显示消息
+
+        // V1.6: 异步调用评分API，完成后更新消息
+        _evaluateSpeechAsync(messageId, text);
       }
     };
 
@@ -228,6 +243,59 @@ class _ChatPageState extends State<ChatPage>
   void _debugLog(String message) {
     if (_enableDebugLogs) {
       print(message);
+    }
+  }
+
+  /// V1.6: 检查文本是否为纯英文
+  bool _isEnglishOnly(String text) {
+    // 移除标点符号和空格后检查
+    final cleanText = text.replaceAll(RegExp(r'[^\w]'), '');
+    if (cleanText.isEmpty) return false;
+
+    // 检查是否包含中文字符 (Unicode范围: \u4e00-\u9fff)
+    final hasChinese = RegExp(r'[\u4e00-\u9fff]').hasMatch(text);
+    if (hasChinese) return false;
+
+    // 检查是否主要由英文字母组成
+    final englishLetters = RegExp(r'[a-zA-Z]').allMatches(cleanText).length;
+    final ratio = englishLetters / cleanText.length;
+
+    return ratio > 0.7;  // 至少70%是英文字母
+  }
+
+  /// V1.6: 异步评分方法 - 评分完成后更新消息
+  void _evaluateSpeechAsync(String messageId, String text) async {
+    try {
+      // V1.6: 语言检测 - 只对纯英文内容评分
+      if (!_isEnglishOnly(text)) {
+        _debugLog('⏭️ [异步] 检测到中文内容，跳过评分: $text');
+        return;
+      }
+
+      _debugLog('🎯 [异步] 开始语音评分: $text');
+      final speechFeedback = await _speechEvalService.evaluateSpeech(text);
+      _debugLog('✅ [异步] 评分完成: ${speechFeedback.overallScore}分');
+
+      // 查找并更新消息
+      final messageIndex = _messages.indexWhere((m) => m.messageId == messageId);
+      if (messageIndex != -1) {
+        setState(() {
+          // 创建新的消息对象（包含评分数据）
+          _messages[messageIndex] = ChatMessage(
+            messageId: messageId,
+            text: text,
+            isUser: true,
+            timestamp: _messages[messageIndex].timestamp,
+            speechFeedback: speechFeedback,  // 添加评分数据
+          );
+        });
+        _debugLog('✅ [异步] 消息已更新，评分卡片已显示');
+      } else {
+        _debugLog('⚠️ [异步] 未找到消息ID: $messageId');
+      }
+    } catch (e) {
+      _debugLog('⚠️ [异步] 评分失败: $e');
+      // 评分失败不影响消息显示，用户消息仍然正常显示
     }
   }
 
@@ -757,13 +825,13 @@ class _ChatPageState extends State<ChatPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,  // 纯黑色背景
+      backgroundColor: Colors.white,  // 白色背景
       body: Stack(
         children: [
           // 🎭 Live2D模型背景层（最底层）
           Positioned.fill(
             child: Container(
-              color: Colors.black,  // 纯黑色背景
+              color: Colors.white,  // 白色背景
               child: Live2DWidget(
                 onControllerCreated: (controller) {
                   setState(() {
@@ -805,19 +873,8 @@ class _ChatPageState extends State<ChatPage>
             left: 4,
             right: 4,
             bottom: 60,
-            child: Container(
+            child: SizedBox(
               height: 320,
-              decoration: BoxDecoration(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 20,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
               child: _buildChatList(),
             ),
           ),
@@ -870,53 +927,80 @@ class _ChatPageState extends State<ChatPage>
   Widget _buildMessageBubble(ChatMessage message) {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 2),  // ✅ 缩短气泡间距: 4 → 2
-      child: Row(
-        mainAxisAlignment: message.isUser
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
+      child: Column(  // V1.6: 改为Column，用于显示消息+评分卡片
+        crossAxisAlignment: message.isUser
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
-          Flexible(
-            child: Container(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.7,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),  // ✅ 缩短内部间距: all(16) → h:12, v:8
-              decoration: BoxDecoration(
-                gradient: message.isUser
-                    ? const LinearGradient(
-                        colors: [Color(0xFF00d4aa), Color(0xFF00c4a7)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      )
-                    : null,
-                color: message.isUser ? null : Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16),
-                  topRight: const Radius.circular(16),
-                  bottomLeft: Radius.circular(message.isUser ? 16 : 4),
-                  bottomRight: Radius.circular(message.isUser ? 4 : 16),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+          Row(
+            mainAxisAlignment: message.isUser
+                ? MainAxisAlignment.end
+                : MainAxisAlignment.start,
+            children: [
+              Flexible(
+                child: Container(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.7,
                   ),
-                ],
-              ),
-              // V1.5: 如果是AI消息，使用RichText渲染可点击单词
-              child: message.isUser
-                  ? Text(
-                      message.text,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.white,
-                        height: 1.3,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),  // ✅ 缩短内部间距: all(16) → h:12, v:8
+                  decoration: BoxDecoration(
+                    gradient: message.isUser
+                        ? const LinearGradient(
+                            colors: [Color(0xFF00d4aa), Color(0xFF00c4a7)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
+                    color: message.isUser ? null : Colors.white,
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(16),
+                      topRight: const Radius.circular(16),
+                      bottomLeft: Radius.circular(message.isUser ? 16 : 4),
+                      bottomRight: Radius.circular(message.isUser ? 4 : 16),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
                       ),
-                    )
-                  : _buildClickableText(message.text),
-            ),
+                    ],
+                  ),
+                  // V1.5: 如果是AI消息，使用RichText渲染可点击单词
+                  child: message.isUser
+                      ? Text(
+                          message.text,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.white,
+                            height: 1.3,
+                          ),
+                        )
+                      : _buildClickableText(message.text),
+                ),
+              ),
+            ],
           ),
+          // V1.6: 如果是用户消息且有评分数据，显示评分卡片
+          if (message.isUser && message.speechFeedback != null)
+            SpeechScoreCard(
+              feedback: message.speechFeedback!,
+              onGrammarTap: message.speechFeedback!.grammar.hasError
+                  ? () => GrammarSuggestionModal.show(
+                        context,
+                        message.speechFeedback!.grammar,
+                      )
+                  : null,
+              onPronunciationTap: () => PronunciationAnalysisModal.show(
+                context,
+                message.speechFeedback!.pronunciation,
+              ),
+              onExpressionTap: () => ExpressionImprovementModal.show(
+                context,
+                message.speechFeedback!.expression,
+                message.speechFeedback!.grammar.original,
+              ),
+            ),
         ],
       ),
     );

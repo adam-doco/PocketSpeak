@@ -19,6 +19,7 @@ import '../widgets/speech_score_card.dart';  // V1.6: 语音评分卡片
 import '../widgets/pronunciation_analysis_modal.dart';  // V1.6: 发音分析弹窗
 import '../widgets/grammar_suggestion_modal.dart';  // V1.6: 语法建议弹窗
 import '../widgets/expression_improvement_modal.dart';  // V1.6: 表达优化弹窗
+import '../widgets/voice_input_bar.dart';  // V1.7: 优化的语音输入条
 
 class ChatMessage {
   final String messageId;
@@ -529,6 +530,29 @@ class _ChatPageState extends State<ChatPage>
     }
   }
 
+  /// 取消语音录音
+  Future<void> _cancelVoiceRecording() async {
+    if (!_isRecording) return;
+
+    try {
+      // 调用后端停止录音API(但不处理结果)
+      await _voiceService.stopRecording();
+
+      setState(() {
+        _isRecording = false;
+        _listeningText = "";
+      });
+
+      _pulseController.stop();
+      _debugLog('❌ 用户取消录音');
+    } catch (e) {
+      _debugLog('❌ 取消录音失败: $e');
+      setState(() {
+        _isRecording = false;
+      });
+    }
+  }
+
   /// 停止语音录音
   Future<void> _stopVoiceRecording() async {
     if (!_isRecording) return;
@@ -861,7 +885,7 @@ class _ChatPageState extends State<ChatPage>
                 ),
                 child: const Icon(
                   Icons.arrow_back_ios_new,
-                  color: Colors.white,
+                  color: Colors.black87,
                   size: 20,
                 ),
               ),
@@ -1268,9 +1292,6 @@ class _ChatPageState extends State<ChatPage>
   Widget _buildInputArea() {
     return Container(
       padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 4,
         bottom: MediaQuery.of(context).padding.bottom - 8,
       ),
       decoration: BoxDecoration(
@@ -1285,118 +1306,13 @@ class _ChatPageState extends State<ChatPage>
       ),
       child: Column(
         children: [
-          // 输入区域
-          Container(
-            padding: const EdgeInsets.only(left: 4, right: 4, top: 10, bottom: 6),  // ✅ 降低4px: top 14 → 10
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: Row(
-              children: [
-                // 语音按钮
-                GestureDetector(
-                  onLongPressStart: (_) => _startVoiceRecording(),
-                  onLongPressEnd: (_) => _stopVoiceRecording(),
-                  onTap: () {
-                    // 点击切换录音状态：未录音时开始，录音中时停止
-                    if (_isRecording) {
-                      _stopVoiceRecording();
-                    } else {
-                      _startVoiceRecording();
-                    }
-                  },
-                  child: AnimatedBuilder(
-                    animation: _pulseAnimation,
-                    builder: (context, child) {
-                      return Transform.scale(
-                        scale: _isRecording ? _pulseAnimation.value : 1.0,
-                        child: Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: _isRecording
-                                ? const Color(0xFFE74C3C)
-                                : (_isSessionInitialized
-                                    ? const Color(0xFF00d4aa)
-                                    : const Color(0xFFCCCCCC)),
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: Icon(
-                            _isRecording ? Icons.stop : Icons.mic,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                // 输入框
-                Expanded(
-                  child: Container(
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF5F5F5),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: TextField(
-                      controller: _textController,
-                      enabled: _isSessionInitialized,
-                      textAlign: TextAlign.left,
-                      decoration: const InputDecoration(
-                        hintText: '请输入文本...',
-                        hintStyle: TextStyle(
-                          color: Color(0xFF999999),
-                          fontSize: 14,
-                        ),
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                      ),
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Color(0xFF2D3436),
-                      ),
-                      textAlignVertical: TextAlignVertical.center,
-                      onSubmitted: (_) => _sendTextMessage(),
-                      onChanged: (text) {
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                // 发送按钮
-                GestureDetector(
-                  onTap: _textController.text.trim().isNotEmpty && _isSessionInitialized
-                      ? _sendTextMessage
-                      : null,
-                  child: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: _textController.text.trim().isNotEmpty && _isSessionInitialized
-                          ? const Color(0xFF667EEA)
-                          : const Color(0xFFCCCCCC),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: const Icon(
-                      Icons.send,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          // V1.7: 使用优化的语音输入条组件
+          VoiceInputBar(
+            isRecording: _isRecording,
+            isEnabled: _isSessionInitialized,
+            onStartRecording: _startVoiceRecording,
+            onStopRecording: _stopVoiceRecording,
+            onCancelRecording: _cancelVoiceRecording,
           ),
         ],
       ),

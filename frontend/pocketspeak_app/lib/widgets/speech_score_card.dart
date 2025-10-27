@@ -23,6 +23,14 @@ class SpeechScoreCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(top: 4),
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.white,  // 添加白色背景
+        border: Border.all(
+          color: Colors.grey.shade300,
+          width: 1,
+        ),
+        borderRadius: BorderRadius.circular(100),  // 使用大值实现半圆效果
+      ),
       child: Wrap(
         spacing: 8,
         runSpacing: 4,
@@ -92,10 +100,6 @@ class SpeechScoreCard extends StatelessWidget {
       onTap: onPronunciationTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(4),
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -113,7 +117,6 @@ class SpeechScoreCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 color: color.withOpacity(0.7),
-                decoration: TextDecoration.underline,
                 height: 1.2,
               ),
             ),
@@ -135,10 +138,6 @@ class SpeechScoreCard extends StatelessWidget {
       onTap: onExpressionTap,  // 始终可点击,查看表达优化详情
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(4),
-        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -157,7 +156,6 @@ class SpeechScoreCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 color: color.withOpacity(0.7),
-                decoration: TextDecoration.underline,
                 height: 1.2,
               ),
             ),

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-语音评分API路由 - PocketSpeak V1.6
-提供语音评分接口
+语音评分API路由 - PocketSpeak V1.7
+提供语音评分接口（使用豆包AI - 性能优化版）
 """
 
 from fastapi import APIRouter, HTTPException, Body
@@ -12,18 +12,18 @@ from utils.api_config_loader import api_config_loader
 # 创建路由器
 router = APIRouter(prefix="/api/eval", tags=["语音评分"])
 
-# 加载DeepSeek评分专用配置（V1.6: 使用独立API Key）
+# 加载豆包评分专用配置（V1.7: 使用豆包AI提升性能）
 config = api_config_loader.get_config()
-deepseek_eval_config = config.get('deepseek_eval', {})
+doubao_eval_config = config.get('doubao_eval', {})
 
-if not deepseek_eval_config.get('enabled'):
-    print("⚠️ DeepSeek评分配置未启用，语音评分功能将不可用")
+if not doubao_eval_config.get('enabled'):
+    print("⚠️ 豆包评分配置未启用，语音评分功能将不可用")
 
 # 初始化评分服务
 eval_service = None
-if deepseek_eval_config.get('enabled'):
-    eval_service = SpeechEvaluationService(deepseek_eval_config)
-    print("✅ 语音评分服务已启用（使用专用API Key）")
+if doubao_eval_config.get('enabled'):
+    eval_service = SpeechEvaluationService(doubao_eval_config)
+    print("✅ 语音评分服务已启用（使用豆包AI）")
 
 
 @router.post("/speech-feedback", response_model=SpeechFeedbackResponse)
@@ -57,7 +57,7 @@ async def evaluate_speech(
         if not eval_service:
             raise HTTPException(
                 status_code=503,
-                detail="语音评分服务未启用，请检查DeepSeek配置"
+                detail="语音评分服务未启用，请检查豆包配置"
             )
 
         # 验证输入

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-语音评分核心服务 - PocketSpeak V1.6
-整合DeepSeek评分，提供完整的评分服务
+语音评分核心服务 - PocketSpeak V1.7
+使用豆包AI评分，提供完整的评分服务（性能优化版）
 """
 
 from typing import Dict
-from .deepseek_client import DeepSeekSpeechEvalClient
+from .doubao_client import DoubaoSpeechEvalClient
 from models.speech_eval_models import (
     SpeechFeedbackResponse,
     GrammarAnalysis,
@@ -18,21 +18,21 @@ from models.speech_eval_models import (
 class SpeechEvaluationService:
     """语音评分服务"""
 
-    def __init__(self, deepseek_config: Dict):
+    def __init__(self, doubao_config: Dict):
         """
         初始化评分服务
 
         Args:
-            deepseek_config: DeepSeek配置字典
+            doubao_config: 豆包配置字典
         """
-        self.deepseek_client = DeepSeekSpeechEvalClient(
-            api_key=deepseek_config['api_key'],
-            base_url=deepseek_config['base_url'],
-            model=deepseek_config.get('model', 'deepseek-chat'),
-            timeout=deepseek_config.get('timeout', 30)
+        self.doubao_client = DoubaoSpeechEvalClient(
+            api_key=doubao_config['api_key'],
+            base_url=doubao_config['base_url'],
+            model=doubao_config.get('model', 'doubao-seed-translation-250915'),
+            timeout=doubao_config.get('timeout', 15)
         )
 
-        print("✅ 语音评分服务初始化完成")
+        print("✅ 语音评分服务初始化完成（豆包AI）")
 
     async def evaluate(self, transcript: str) -> SpeechFeedbackResponse:
         """
@@ -49,8 +49,8 @@ class SpeechEvaluationService:
         """
         print(f"\n📝 开始评分: {transcript}")
 
-        # 调用DeepSeek进行评分
-        result = await self.deepseek_client.evaluate_speech(transcript)
+        # 调用豆包进行评分
+        result = await self.doubao_client.evaluate_speech(transcript)
 
         if not result.get('success'):
             error_msg = result.get('error', '评分失败')
@@ -74,13 +74,15 @@ class SpeechEvaluationService:
                 WordPronunciation(word=w['word'], status=w['status'])
                 for w in pronunciation_data['words']
             ]
+            # V1.7.1: 添加默认值,避免豆包返回不完整字段
+            base_score = pronunciation_data.get('score', 85)
             pronunciation = PronunciationDetail(
-                score=pronunciation_data['score'],
+                score=base_score,
                 words=words,
-                fluency=pronunciation_data['fluency'],
-                clarity=pronunciation_data['clarity'],
-                completeness=pronunciation_data['completeness'],
-                speed_wpm=pronunciation_data['speed_wpm']
+                fluency=pronunciation_data.get('fluency', base_score),
+                clarity=pronunciation_data.get('clarity', base_score),
+                completeness=pronunciation_data.get('completeness', 100),
+                speed_wpm=pronunciation_data.get('speed_wpm', 120)
             )
 
             # 构造表达评估

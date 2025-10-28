@@ -6,8 +6,9 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 /// 语音交互服务
 /// 封装与后端语音API的所有交互
 class VoiceService {
-  static const String baseUrl = 'http://localhost:8000';
-  static const String wsUrl = 'ws://localhost:8000/api/voice/ws';
+  // iOS真机测试：使用Mac的本地IP地址
+  static const String baseUrl = 'http://192.168.100.148:8000';
+  static const String wsUrl = 'ws://192.168.100.148:8000/api/voice/ws';
 
   // 会话状态
   bool _isSessionInitialized = false;

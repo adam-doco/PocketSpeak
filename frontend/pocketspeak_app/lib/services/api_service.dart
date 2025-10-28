@@ -3,7 +3,8 @@ import 'package:http/http.dart' as http;
 
 class ApiService {
   // 基础URL - 根据后端实际地址修改
-  static const String baseUrl = 'http://localhost:8000';
+  // iOS真机测试：使用Mac的本地IP地址
+  static const String baseUrl = 'http://192.168.100.148:8000';
 
   // 存储绑定过程中的challenge值
   String? _currentChallenge;

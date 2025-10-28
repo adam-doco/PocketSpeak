@@ -14,7 +14,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class UserService {
   /// API 基础 URL（根据环境配置）
-  static const String _baseUrl = 'http://127.0.0.1:8000';
+  /// iOS真机测试：使用Mac的本地IP地址
+  static const String _baseUrl = 'http://192.168.100.148:8000';
 
   /// Token 存储 Key
   static const String _tokenKey = 'auth_token';

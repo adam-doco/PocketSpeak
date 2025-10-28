@@ -8,7 +8,8 @@ import '../services/auth_service.dart';
 
 class WordService {
   // 基础URL - 与ApiService保持一致
-  static const String baseUrl = 'http://localhost:8000';
+  // iOS真机测试：使用Mac的本地IP地址
+  static const String baseUrl = 'http://192.168.100.148:8000';
 
   final AuthService _authService = AuthService();
 

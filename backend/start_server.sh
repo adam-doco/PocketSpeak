@@ -49,8 +49,12 @@ echo
 
 source "$VENV_DIR/bin/activate"
 
-# 后台启动服务
-nohup python main.py > "$LOG_FILE" 2>&1 &
+# 设置Opus库路径（macOS需要DYLD_LIBRARY_PATH）
+export DYLD_LIBRARY_PATH="/opt/homebrew/lib:$DYLD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="/opt/homebrew/lib:$LD_LIBRARY_PATH"
+
+# 后台启动服务，传递环境变量
+env DYLD_LIBRARY_PATH="/opt/homebrew/lib" LD_LIBRARY_PATH="/opt/homebrew/lib" nohup python main.py > "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 
 # 保存PID

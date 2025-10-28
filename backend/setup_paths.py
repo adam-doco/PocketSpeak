@@ -24,5 +24,5 @@ py_xiaozhi_path = BACKEND_DIR / "libs" / "py_xiaozhi"
 if py_xiaozhi_path.exists():
     py_xiaozhi_str = str(py_xiaozhi_path)
     if py_xiaozhi_str not in sys.path:
-        sys.path.insert(0, py_xiaozhi_str)
+        sys.path.append(py_xiaozhi_str)  # 使用append而不是insert(0)，避免覆盖backend的main.py
         print(f"✅ py-xiaozhi 路径已添加: {py_xiaozhi_path}")

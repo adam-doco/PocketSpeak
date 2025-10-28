@@ -14,7 +14,8 @@ class AuthService {
   AuthService._internal();
 
   /// 后端 API 基础 URL
-  static const String baseUrl = 'http://127.0.0.1:8000';
+  /// iOS真机测试：使用Mac的本地IP地址
+  static const String baseUrl = 'http://192.168.100.148:8000';
 
   /// Token 存储 Key
   static const String _tokenKey = 'auth_token';

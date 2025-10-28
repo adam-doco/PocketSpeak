@@ -7,7 +7,8 @@ import '../models/speech_feedback.dart';
 
 class SpeechEvalService {
   // 基础URL - 与其他服务保持一致
-  static const String baseUrl = 'http://localhost:8000';
+  // iOS真机测试：使用Mac的本地IP地址
+  static const String baseUrl = 'http://192.168.100.148:8000';
 
   /// 评估语音文本
   ///

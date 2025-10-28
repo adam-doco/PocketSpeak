@@ -975,27 +975,30 @@ class _ChatPageState extends State<ChatPage>
                             end: Alignment.bottomRight,
                           )
                         : null,
-                    color: message.isUser ? null : Colors.white,
+                    color: message.isUser ? null : const Color(0xFFF5F5F5),  // AI消息：浅灰色背景
                     borderRadius: BorderRadius.only(
                       topLeft: const Radius.circular(16),
                       topRight: const Radius.circular(16),
                       bottomLeft: Radius.circular(message.isUser ? 16 : 4),
                       bottomRight: Radius.circular(message.isUser ? 4 : 16),
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.08),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
+                    // 去掉投影
+                    boxShadow: message.isUser
+                        ? [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.08),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ]
+                        : null,  // AI消息不显示投影
                   ),
                   // V1.5: 如果是AI消息，使用RichText渲染可点击单词
                   child: message.isUser
                       ? Text(
                           message.text,
                           style: TextStyle(
-                            fontSize: 14,
+                            fontSize: 16,  // 从 14 增大到 16
                             color: Colors.white,
                             height: 1.3,
                           ),
@@ -1102,7 +1105,7 @@ class _ChatPageState extends State<ChatPage>
       return Text(
         text,
         style: const TextStyle(
-          fontSize: 14,
+          fontSize: 16,  // 从 14 增大到 16
           color: Color(0xFF2D3436),
           height: 1.3,
         ),
@@ -1120,7 +1123,7 @@ class _ChatPageState extends State<ChatPage>
           TextSpan(
             text: text.substring(lastEnd, match.start),
             style: const TextStyle(
-              fontSize: 14,
+              fontSize: 16,  // 从 14 增大到 16
               color: Color(0xFF2D3436),
               height: 1.3,
             ),
@@ -1134,7 +1137,7 @@ class _ChatPageState extends State<ChatPage>
         TextSpan(
           text: word,
           style: const TextStyle(
-            fontSize: 14,
+            fontSize: 16,  // 从 14 增大到 16
             color: Color(0xFF2D3436),  // 与普通文本颜色一致
             height: 1.3,
           ),
@@ -1152,7 +1155,7 @@ class _ChatPageState extends State<ChatPage>
         TextSpan(
           text: text.substring(lastEnd),
           style: const TextStyle(
-            fontSize: 14,
+            fontSize: 16,  // 从 14 增大到 16
             color: Color(0xFF2D3436),
             height: 1.3,
           ),

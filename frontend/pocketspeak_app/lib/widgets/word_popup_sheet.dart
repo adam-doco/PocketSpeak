@@ -392,9 +392,10 @@ class _WordPopupSheetState extends State<WordPopupSheet> {
       print('🔊 播放${type == "us" ? "美式" : "英式"}发音: ${widget.lookupResult.word}');
 
       // V1.5: 将相对路径转换为完整URL
+      // iOS真机测试：使用 WordService.baseUrl 而非硬编码 localhost
       final fullAudioUrl = audioUrl.startsWith('http')
           ? audioUrl
-          : 'http://localhost:8000$audioUrl';
+          : '${WordService.baseUrl}$audioUrl';
 
       print('🔗 音频URL: $fullAudioUrl');
 
